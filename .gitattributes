@@ -1,0 +1,10 @@
+# Auto detect text files and perform LF normalization
+* text=auto
+
+# Explicitly mark binary assets so they are never line-ending normalized
+*.ico  binary
+*.png  binary
+*.jpg  binary
+*.exe  binary
+*.dll  binary
+*.pdb  binary

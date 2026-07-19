@@ -1,0 +1,56 @@
+name: Build Plugin
+
+on:
+  push:
+    branches: [ "main" ]
+    paths-ignore:
+      - '**.md'
+      - '.gitignore'
+      - 'LICENSE'
+      - '.github/assets/**'
+      - '.github/ISSUE_TEMPLATE/**'
+  pull_request:
+    branches: [ "main" ]
+    paths-ignore:
+      - '**.md'
+      - '.gitignore'
+      - 'LICENSE'
+      - '.github/assets/**'
+      - '.github/ISSUE_TEMPLATE/**'
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout code (with submodules)
+        uses: actions/checkout@v4
+        with:
+          submodules: 'recursive'
+
+      - name: Setup .NET 10.0
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Restore and Publish Hi3Helper.Plugin.NTE (NativeAOT)
+        shell: pwsh
+        run: |
+          dotnet restore Hi3Helper.Plugin.NTE/Hi3Helper.Plugin.NTE.csproj `
+            -r win-x64
+
+          dotnet publish Hi3Helper.Plugin.NTE/Hi3Helper.Plugin.NTE.csproj `
+            -c Release `
+            -r win-x64 `
+            --self-contained true `
+            -p:PublishProfile=ReleasePublish-O2 `
+            --no-restore `
+            -o ./publish_output/Hi3Helper.Plugin.NTE
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Hi3Helper.Plugin.NTE-ReleasePublish-O2
+          path: |
+            ./publish_output/Hi3Helper.Plugin.NTE/**
