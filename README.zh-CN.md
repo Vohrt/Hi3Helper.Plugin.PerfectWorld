@@ -103,6 +103,20 @@ dotnet publish Hi3Helper.Plugin.NTE/Hi3Helper.Plugin.NTE.csproj -c Release -r wi
 若整个 `lastdiff` 清单不可用，则回退到经典的全文件对账。这样即便异环的 UE5 IoStore 把所有内容打包进
 几个数 GB 的 `.pak`/`.ucas` 大文件，增量更新的下载量依然很小。
 
+**启动器内容（背景、资讯、轮播、社媒）。** 插件还会直接用完美世界的线上网页数据填充 Collapse 的主页——
+`pw_sdk` 没有公开的 launcher-media JSON 接口，因此每一项都取自官方启动器自身所用的来源：
+
+* **背景图与背景视频**——取自启动器自己的 `bgimgs` 资源（`Version.ini` → `AllFiles.xml` → `config.json`）。
+  静态图片与视频片段会被下载、解压并按内容寻址缓存，再以本地文件形式提供给 Collapse（默认显示图片，
+  视频作为可切换的第二背景）。
+* **资讯**——从公开的启动器页面解析出三栏（新闻 / 公告 / 活动）。
+* **轮播 Banner**——从站点的 `gameSwiper` 数据解析（Banner 图片 + 跳转链接）。
+* **社交媒体**——侧边栏条目（官方微博、官方 QQ 群、官方微信、TapTap、好游快爆、塔吉多、官方客服），
+  配自带的内嵌 SVG 图标，并在可用时附上二维码图片。
+
+以上全部只依赖 AOT 安全的基础设施（`[GeneratedRegex]`、`JsonDocument`、`System.IO.Compression`），
+不引入任何第三方依赖。每一步都是尽力而为：若某个来源不可达，插件就跳过该元素，Collapse 会回退到内嵌海报。
+
 ## 致谢与许可
 
 * 基于 [Collapse Launcher 插件 SDK](https://github.com/CollapseLauncher/Hi3Helper.Plugin.Core) 构建。

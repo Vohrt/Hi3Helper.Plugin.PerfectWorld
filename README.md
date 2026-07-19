@@ -107,6 +107,23 @@ a full content-addressed download, and if the whole `lastdiff` manifest is unava
 reconciliation is used. This keeps NTE updates small even though its UE5 IoStore packs everything into a few
 multi-GB `.pak`/`.ucas` files.
 
+**Launcher content (background, news, banners, social).** The plugin also fills Collapse's home screen
+straight from Perfect World's live web sources — `pw_sdk` has no public launcher-media JSON API, so each
+element is derived from what the official launcher itself uses:
+
+* **Background image & video** — taken from the launcher's own `bgimgs` set (`Version.ini` →
+  `AllFiles.xml` → `config.json`). The static image and the video clip are downloaded, unzipped and cached
+  content-addressed, then served to Collapse as local files (image is the default; the video is a
+  switchable second background).
+* **News** — the three columns (Info / Notice / Event) are parsed from the public launcher page.
+* **Carousel banners** — parsed from the site's `gameSwiper` data (banner image + click-through link).
+* **Social media** — the sidebar entries (官方微博, 官方 QQ 群, 官方微信, TapTap, 好游快爆, 塔吉多,
+  官方客服) with self-contained inline-SVG icons and, where available, QR images.
+
+All of this relies only on AOT-safe primitives (`[GeneratedRegex]`, `JsonDocument`,
+`System.IO.Compression`) and pulls in no third-party dependency. Every step is best-effort: if a source is
+unreachable the plugin just omits that element and Collapse falls back to its embedded poster.
+
 ## Credits & license
 
 * Built on the [Collapse Launcher plugin SDK](https://github.com/CollapseLauncher/Hi3Helper.Plugin.Core).

@@ -30,6 +30,14 @@ public partial class NteCnPresetConfig : PluginPresetConfigBase
         LaunchArguments            = "/launcher"
     };
 
+    private static readonly WanmeiNewsConfig NteNewsConfig = new()
+    {
+        NewsPageUrl     = "https://yh.wanmei.com/launcher/launcher_ob.html?expand=1",
+        NewsLinkBaseUrl = "https://yh.wanmei.com",
+        BannerJsUrl     = "https://static.games.wanmei.com/public/commonData/gamesData/gameSwiper/yh-gameSwiper.js",
+        Referer         = "https://yh.wanmei.com/"
+    };
+
     [field: AllowNull] [field: MaybeNull] public override string GameName => field ??= "Neverness To Everness";
     [field: AllowNull] [field: MaybeNull] public override string GameExecutableName => field ??= ExEcutableName;
 
@@ -77,13 +85,13 @@ public partial class NteCnPresetConfig : PluginPresetConfigBase
 
     public override ILauncherApiMedia? LauncherApiMedia
     {
-        get => field ??= new WanmeiLauncherApiMedia();
+        get => field ??= new WanmeiLauncherApiMedia(NteGameConfig);
         set;
     }
 
     public override ILauncherApiNews? LauncherApiNews
     {
-        get => field ??= new WanmeiLauncherApiNews();
+        get => field ??= new WanmeiLauncherApiNews(NteNewsConfig);
         set;
     }
 
