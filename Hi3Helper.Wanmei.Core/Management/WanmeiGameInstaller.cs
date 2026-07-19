@@ -82,9 +82,9 @@ public partial class WanmeiGameInstaller : GameInstallerBase
     protected override Task StartUpdateAsyncInner(InstallProgressDelegate? progressDelegate,
         InstallProgressStateDelegate? progressStateDelegate, CancellationToken token)
     {
-        // Full-file reconciliation against the newest manifest: any file whose hash/size no longer matches is
-        // re-fetched. This always converges to the target version (delta/HDiffPatch is a future optimisation).
-        return ReconcileToManifestAsync(progressDelegate, progressStateDelegate, verifyHash: true, token);
+        // Prefer HDiffPatch block-level deltas (download a small binary patch and apply it locally); any file that
+        // has no usable patch — or whose patch fails — transparently falls back to a full content-addressed download.
+        return DeltaUpdateAsync(progressDelegate, progressStateDelegate, token);
     }
 
     protected override Task StartPreloadAsyncInner(InstallProgressDelegate? progressDelegate,
@@ -235,6 +235,14 @@ public partial class WanmeiGameInstaller : GameInstallerBase
         return Convert.ToHexStringLower(hash).Equals(expectedMd5, StringComparison.OrdinalIgnoreCase);
     }
 
+    internal static async Task<string> ComputeMd5Async(string filePath, CancellationToken token)
+    {
+        using var md5 = MD5.Create();
+        await using FileStream stream = File.OpenRead(filePath);
+        byte[] hash = await md5.ComputeHashAsync(stream, token).ConfigureAwait(false);
+        return Convert.ToHexStringLower(hash);
+    }
+
     internal static void ForceDeleteFile(string filePath)
     {
         if (!File.Exists(filePath)) return;
@@ -248,6 +256,7 @@ public partial class WanmeiGameInstaller : GameInstallerBase
     public override void Dispose()
     {
         _downloadHttpClient.Dispose();
+        _patchApplyLock.Dispose();
         GC.SuppressFinalize(this);
     }
 }

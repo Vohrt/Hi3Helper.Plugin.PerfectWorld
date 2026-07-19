@@ -1,0 +1,305 @@
+using System;
+using System.Collections.Concurrent;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
+using Hi3Helper.Plugin.Core;
+using Hi3Helper.Plugin.Core.Management;
+using Hi3Helper.Wanmei.Core.Management.Api;
+using Hi3Helper.Wanmei.Core.Utils;
+using Microsoft.Extensions.Logging;
+using SharpHDiffPatch.Core;
+
+namespace Hi3Helper.Wanmei.Core.Management;
+
+public partial class WanmeiGameInstaller
+{
+    private List<WanmeiPatchEntry>? _cachedPatches;
+    private string? _cachedPatchesVersion;
+
+    // The managed HDiffPatch applier keeps some process-wide static state and each apply can allocate large
+    // buffers for multi-GB paks, so applies are serialised while downloads stay parallel.
+    private readonly SemaphoreSlim _patchApplyLock = new(1, 1);
+
+    /// <summary>
+    ///     A per-file update action: either apply a binary <see cref="WanmeiPatchEntry"/> delta on top of the local
+    ///     file, or fully (re)download the content-addressed target.
+    /// </summary>
+    private readonly struct UpdatePlan
+    {
+        public required WanmeiResEntry Entry { get; init; }
+        public WanmeiPatchEntry? Patch { get; init; }
+        public bool IsDelta => Patch != null;
+
+        public static UpdatePlan Delta(WanmeiResEntry entry, WanmeiPatchEntry patch) =>
+            new() { Entry = entry, Patch = patch };
+
+        public static UpdatePlan Full(WanmeiResEntry entry) =>
+            new() { Entry = entry };
+    }
+
+    /// <summary>
+    ///     Fetches and decodes the incremental <c>lastdiff</c> manifest for the current remote resource version
+    ///     (cached). The blob is served raw (PatcherXML0) but a zip-wrapped variant is tolerated too.
+    /// </summary>
+    private async Task<List<WanmeiPatchEntry>> GetPatchManifestAsync(WanmeiRemoteConfig remote,
+        CancellationToken token)
+    {
+        if (_cachedPatches != null && _cachedPatchesVersion == remote.ResVersion)
+            return _cachedPatches;
+
+        WanmeiGameConfig config = Manager.Config;
+        byte[] raw = await DownloadBytesWithFallbackAsync(
+            cdn => config.BuildLastDiffUrl(cdn, remote.ResVersion), token).ConfigureAwait(false);
+
+        byte[] bin = LooksLikeZip(raw) ? ExtractZipEntry(raw, "lastdiff.bin") : raw;
+        string xml = PatcherXml0.DecodeToXml(bin, config.AppId);
+        List<WanmeiPatchEntry> entries = WanmeiManifest.ParsePatchList(xml);
+
+        SharedStatic.InstanceLogger.LogInformation(
+            "[WanmeiInstaller] lastdiff {Version}: {Count} patch entries.", remote.ResVersion, entries.Count);
+
+        _cachedPatches = entries;
+        _cachedPatchesVersion = remote.ResVersion;
+        return entries;
+    }
+
+    /// <summary>
+    ///     Incremental update path. Every changed file is brought to the target manifest state by applying an
+    ///     HDiffPatch delta when a matching (oldMd5 → newMd5) patch smaller than a full download exists; otherwise
+    ///     the target is downloaded whole. Any per-file delta failure transparently falls back to a full download,
+    ///     and if the whole <c>lastdiff</c> manifest is unavailable the classic full-file reconcile is used.
+    /// </summary>
+    private async Task DeltaUpdateAsync(InstallProgressDelegate? progressDelegate,
+        InstallProgressStateDelegate? progressStateDelegate, CancellationToken token)
+    {
+        string installPath = EnsureAndGetGamePath();
+
+        // --- Preparing: remote config + target manifest + patch manifest --------------------------------
+        progressStateDelegate?.Invoke(InstallProgressState.Preparing);
+
+        WanmeiRemoteConfig? remote = await Manager.GetRemoteConfigAsync(true, token).ConfigureAwait(false);
+        if (remote == null || string.IsNullOrEmpty(remote.ResVersion))
+            throw new IOException("Unable to obtain remote config.xml.");
+
+        List<WanmeiResEntry> manifest = await GetManifestAsync(token, forceRefresh: true).ConfigureAwait(false);
+        if (manifest.Count == 0)
+            throw new IOException("Manifest contained no file entries.");
+
+        List<WanmeiPatchEntry> patches;
+        try
+        {
+            patches = await GetPatchManifestAsync(remote, token).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            SharedStatic.InstanceLogger.LogWarning(
+                "[WanmeiInstaller] lastdiff unavailable ({Msg}); using full-file reconcile.", ex.Message);
+            await ReconcileToManifestAsync(progressDelegate, progressStateDelegate, verifyHash: true, token)
+                .ConfigureAwait(false);
+            return;
+        }
+
+        // Index candidate patches by target content id, then by source content id.
+        var patchByNew = new Dictionary<string, Dictionary<string, WanmeiPatchEntry>>(StringComparer.OrdinalIgnoreCase);
+        foreach (WanmeiPatchEntry p in patches)
+        {
+            if (!patchByNew.TryGetValue(p.NewMd5, out Dictionary<string, WanmeiPatchEntry>? byOld))
+                patchByNew[p.NewMd5] = byOld = new Dictionary<string, WanmeiPatchEntry>(StringComparer.OrdinalIgnoreCase);
+            byOld[p.OldMd5] = p;
+        }
+
+        // --- Verify: classify each manifest entry (up-to-date / delta / full) ---------------------------
+        progressStateDelegate?.Invoke(InstallProgressState.Verify);
+
+        var plans = new ConcurrentBag<UpdatePlan>();
+        await Parallel.ForEachAsync(manifest,
+            new ParallelOptions { MaxDegreeOfParallelism = VerifyParallelism, CancellationToken = token },
+            async (entry, ct) =>
+            {
+                string localPath = Path.Combine(installPath,
+                    entry.Filename.Replace('/', Path.DirectorySeparatorChar));
+
+                bool exists = File.Exists(localPath);
+                if (exists && new FileInfo(localPath).Length == entry.FileSize &&
+                    await CheckMd5Async(localPath, entry.Md5, ct).ConfigureAwait(false))
+                {
+                    return; // already at target
+                }
+
+                if (exists &&
+                    patchByNew.TryGetValue(entry.Md5, out Dictionary<string, WanmeiPatchEntry>? byOld) &&
+                    byOld.Count > 0)
+                {
+                    string localMd5 = await ComputeMd5Async(localPath, ct).ConfigureAwait(false);
+                    if (byOld.TryGetValue(localMd5, out WanmeiPatchEntry? patch) &&
+                        patch.NewSize == entry.FileSize &&
+                        patch.PatchSize < entry.FileSize) // only worthwhile if the patch is smaller than a full fetch
+                    {
+                        plans.Add(UpdatePlan.Delta(entry, patch));
+                        return;
+                    }
+                }
+
+                plans.Add(UpdatePlan.Full(entry));
+            }).ConfigureAwait(false);
+
+        List<UpdatePlan> planList = plans.ToList();
+        int upToDate = manifest.Count - planList.Count;
+        long totalTransfer = planList.Sum(p => p.IsDelta ? p.Patch!.PatchSize : p.Entry.FileSize);
+
+        int deltaCount = planList.Count(p => p.IsDelta);
+        SharedStatic.InstanceLogger.LogInformation(
+            "[WanmeiInstaller] Update {Version}: {UpToDate} up-to-date, {Delta} delta, {Full} full ({Bytes} bytes).",
+            remote.ResVersion, upToDate, deltaCount, planList.Count - deltaCount, totalTransfer);
+
+        // --- Update: download patches/files and apply ---------------------------------------------------
+        progressStateDelegate?.Invoke(InstallProgressState.Updating);
+
+        lock (_reportLock)
+        {
+            _progress = new InstallProgress
+            {
+                TotalBytesToDownload = totalTransfer,
+                DownloadedBytes      = 0,
+                TotalCountToDownload = manifest.Count,
+                DownloadedCount      = upToDate
+            };
+            _lastReportTick = 0;
+        }
+
+        long downloadedBytes = 0;
+        int downloadedCount = upToDate;
+
+        void AddToTotal(long extra)
+        {
+            lock (_reportLock) _progress.TotalBytesToDownload += extra;
+        }
+
+        await Parallel.ForEachAsync(planList,
+            new ParallelOptions { MaxDegreeOfParallelism = DownloadParallelism, CancellationToken = token },
+            async (plan, ct) =>
+            {
+                string localPath = Path.Combine(installPath,
+                    plan.Entry.Filename.Replace('/', Path.DirectorySeparatorChar));
+                string? dir = Path.GetDirectoryName(localPath);
+                if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
+
+                void Report(long delta)
+                {
+                    long nb = Interlocked.Add(ref downloadedBytes, delta);
+                    ReportProgress(nb, Volatile.Read(ref downloadedCount), progressDelegate, force: false);
+                }
+
+                bool done = false;
+                if (plan.IsDelta)
+                {
+                    try
+                    {
+                        await ApplyDeltaAsync(plan.Entry, plan.Patch!, localPath, ct, Report).ConfigureAwait(false);
+                        done = true;
+                    }
+                    catch (Exception ex) when (ex is not OperationCanceledException)
+                    {
+                        SharedStatic.InstanceLogger.LogWarning(
+                            "[WanmeiInstaller] Delta failed for {File} ({Msg}); falling back to full download.",
+                            plan.Entry.Filename, ex.Message);
+                        // The full download transfers the whole file instead of just the patch, so widen the total.
+                        AddToTotal(plan.Entry.FileSize - plan.Patch!.PatchSize);
+                    }
+                }
+
+                if (!done)
+                    await DownloadFullAsync(plan.Entry, localPath, ct, Report).ConfigureAwait(false);
+
+                int nc = Interlocked.Increment(ref downloadedCount);
+                ReportProgress(Volatile.Read(ref downloadedBytes), nc, progressDelegate, force: true);
+            }).ConfigureAwait(false);
+
+        // --- Completion ---------------------------------------------------------------------------------
+        ReportProgress(Volatile.Read(ref downloadedBytes), manifest.Count, progressDelegate, force: true);
+
+        Manager.WriteInstalledResVersion(remote.ResVersion);
+        progressStateDelegate?.Invoke(InstallProgressState.Completed);
+
+        SharedStatic.InstanceLogger.LogInformation(
+            "[WanmeiInstaller] Incremental update to {Version} complete ({Count} files, {Delta} via delta).",
+            remote.ResVersion, manifest.Count, deltaCount);
+    }
+
+    /// <summary>
+    ///     Downloads the HDiffPatch delta blob for <paramref name="patch"/>, applies it on top of the existing local
+    ///     file and atomically replaces it. Throws on any verification failure so the caller can fall back to a full
+    ///     download; the local file is left untouched until the patched result is fully verified.
+    /// </summary>
+    private async Task ApplyDeltaAsync(WanmeiResEntry entry, WanmeiPatchEntry patch, string localPath,
+        CancellationToken token, Action<long> onProgress)
+    {
+        string patchPath = localPath + ".hpatch";
+        string outputPath = localPath + ".hnew";
+
+        try
+        {
+            await DownloadContentFileAsync(patch.PatchMd5, patch.PatchSize, patchPath, token, onProgress)
+                .ConfigureAwait(false);
+
+            if (!await CheckMd5Async(patchPath, patch.PatchMd5, token).ConfigureAwait(false))
+                throw new IOException($"Patch blob MD5 mismatch for {entry.Filename}.");
+
+            ForceDeleteFile(outputPath);
+
+            await _patchApplyLock.WaitAsync(token).ConfigureAwait(false);
+            try
+            {
+                await Task.Run(() =>
+                {
+                    var patcher = new HDiffPatch();
+                    patcher.Initialize(patchPath);
+                    patcher.Patch(localPath, outputPath, useBufferedPatch: true, token);
+                }, token).ConfigureAwait(false);
+            }
+            finally
+            {
+                _patchApplyLock.Release();
+            }
+
+            if (!File.Exists(outputPath) || new FileInfo(outputPath).Length != entry.FileSize)
+                throw new IOException($"Patched size mismatch for {entry.Filename}.");
+            if (!await CheckMd5Async(outputPath, entry.Md5, token).ConfigureAwait(false))
+                throw new IOException($"Patched MD5 mismatch for {entry.Filename}.");
+
+            ForceDeleteFile(localPath);
+            File.Move(outputPath, localPath);
+        }
+        finally
+        {
+            ForceDeleteFile(patchPath);
+            ForceDeleteFile(outputPath);
+        }
+    }
+
+    /// <summary>
+    ///     Fully downloads a content-addressed target file into place and verifies its MD5.
+    /// </summary>
+    private async Task DownloadFullAsync(WanmeiResEntry entry, string localPath, CancellationToken token,
+        Action<long> onProgress)
+    {
+        string tempPath = localPath + ".tmp";
+
+        await DownloadContentFileAsync(entry.Md5, entry.FileSize, tempPath, token, onProgress).ConfigureAwait(false);
+
+        if (!await CheckMd5Async(tempPath, entry.Md5, token).ConfigureAwait(false))
+        {
+            ForceDeleteFile(tempPath);
+            throw new IOException($"MD5 mismatch for {entry.Filename}.");
+        }
+
+        ForceDeleteFile(localPath);
+        File.Move(tempPath, localPath);
+    }
+
+    private static bool LooksLikeZip(byte[] data) =>
+        data.Length >= 2 && data[0] == (byte)'P' && data[1] == (byte)'K';
+}

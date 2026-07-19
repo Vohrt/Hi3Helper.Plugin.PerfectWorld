@@ -60,6 +60,15 @@ public sealed class WanmeiGameConfig
     }
 
     /// <summary>
+    ///     Encrypted incremental (delta) manifest: <c>.../{branch}/Version/{platform}/version/{resVersion}/lastdiff.bin</c>.
+    ///     Unlike <c>ResList</c> this blob is served raw (not zip-wrapped) but shares the same PatcherXML0 envelope.
+    /// </summary>
+    public string BuildLastDiffUrl(string cdnRoot, string resVersion)
+    {
+        return $"{cdnRoot.TrimEnd('/')}/{GameResBranch}/Version/{Platform}/version/{resVersion}/lastdiff.bin";
+    }
+
+    /// <summary>
     ///     Content-addressed file URL: <c>.../{branch}/Res/{md5[0]}/{md5}.{size}</c>.
     /// </summary>
     public string BuildContentUrl(string cdnRoot, string md5, long size)

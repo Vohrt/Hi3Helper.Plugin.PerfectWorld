@@ -27,4 +27,9 @@
         <ProjectReference Include="..\Hi3Helper.Plugin.Core\Hi3Helper.Plugin.Core.csproj"/>
     </ItemGroup>
 
+    <ItemGroup>
+        <!-- Managed HDiffPatch applier for block-level incremental updates (pw_sdk uncompressed HDIFF13 diffs). -->
+        <PackageReference Include="SharpHDiffPatch.Core" Version="2.3.4"/>
+    </ItemGroup>
+
 </Project>

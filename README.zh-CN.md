@@ -21,7 +21,7 @@ Hi3Helper.Plugin.PerfectWorld/
 ├── Hi3Helper.Wanmei.Core/        # 可复用的“完美世界”发行商核心（程序集：Wanmei.Core）
 │   ├── Utils/PatcherXml0.cs      #   PatcherXML0 清单解码器（AES-128-CBC + zlib）
 │   ├── WanmeiGameConfig.cs       #   每游戏配置 + CDN URL 构造
-│   └── Management/               #   版本管理器 + 内容寻址下载引擎
+│   └── Management/               #   版本管理器 + 内容寻址下载与 HDiffPatch 增量引擎
 ├── Hi3Helper.Plugin.NTE/         # 异环的薄插件（程序集：NTE）
 │   ├── Management/PresetConfig/  #   异环专属数据（App ID、CDN、可执行文件路径、启动参数）
 │   └── Properties/PublishProfiles/
@@ -94,7 +94,14 @@ dotnet publish Hi3Helper.Plugin.NTE/Hi3Helper.Plugin.NTE.csproj -c Release -r wi
 
 `Wanmei.Core` 会拉取 `config.xml`，下载并解密带版本号的 `ResList.bin.zip`，再从
 `.../publish_PC/Res/<md5[0]>/<md5>.<filesize>` 下载每个内容寻址文件并校验 MD5。
-安装采用全文件对账（full-file reconciliation）；二进制差分补丁（HDiffPatch）是后续可选的优化方向。
+
+**增量更新（HDiffPatch）。** 更新时，`Wanmei.Core` 还会拉取并解密带版本号的 `lastdiff.bin` 补丁清单。
+对每个发生变化的文件，它会查找一个二进制差分补丁——其源 MD5 与本地文件一致、目标 MD5 与目标文件一致；
+若存在这样的补丁（且体积小于整文件下载），就只下载这个很小的 `HDIFF13` 补丁块，用托管的
+[`SharpHDiffPatch.Core`](https://github.com/CollapseLauncher/SharpHDiffPatch.Core) 打补丁器在本地应用，
+并按 MD5 校验结果。若某文件没有可用补丁，或补丁应用/校验失败，则自动回退为整文件内容寻址下载；
+若整个 `lastdiff` 清单不可用，则回退到经典的全文件对账。这样即便异环的 UE5 IoStore 把所有内容打包进
+几个数 GB 的 `.pak`/`.ucas` 大文件，增量更新的下载量依然很小。
 
 ## 致谢与许可
 

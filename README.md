@@ -21,7 +21,7 @@ Hi3Helper.Plugin.PerfectWorld/
 ├── Hi3Helper.Wanmei.Core/        # Shared "Perfect World" publisher core (assembly: Wanmei.Core)
 │   ├── Utils/PatcherXml0.cs      #   PatcherXML0 manifest decoder (AES-128-CBC + zlib)
 │   ├── WanmeiGameConfig.cs       #   Per-game config + CDN URL builders
-│   └── Management/               #   Version manager + content-addressed download engine
+│   └── Management/               #   Version manager + content-addressed download & HDiffPatch delta engine
 ├── Hi3Helper.Plugin.NTE/         # Thin plugin for NTE (assembly: NTE)
 │   ├── Management/PresetConfig/  #   NTE-specific data (app id, CDN, exe path, launch args)
 │   └── Properties/PublishProfiles/
@@ -96,8 +96,16 @@ The Perfect World PatcherSDK ships its file manifests encrypted as `PatcherXML0`
 
 `Wanmei.Core` fetches `config.xml`, downloads and decrypts the versioned `ResList.bin.zip`, then
 downloads each content-addressed file from `.../publish_PC/Res/<md5[0]>/<md5>.<filesize>`, verifying MD5.
-Installation uses full-file reconciliation; binary delta patching (HDiffPatch) is a possible future
-optimization.
+
+**Incremental updates (HDiffPatch).** On update, `Wanmei.Core` also fetches and decrypts the versioned
+`lastdiff.bin` patch manifest. For every changed file it looks for a binary delta whose source MD5 matches
+the local file and whose target MD5 matches the wanted file; when one exists (and is smaller than a full
+download) it downloads just that small `HDIFF13` patch blob, applies it locally with the managed
+[`SharpHDiffPatch.Core`](https://github.com/CollapseLauncher/SharpHDiffPatch.Core) patcher, and verifies the
+result by MD5. Files with no usable patch — or whose patch fails to apply/verify — transparently fall back to
+a full content-addressed download, and if the whole `lastdiff` manifest is unavailable the classic full-file
+reconciliation is used. This keeps NTE updates small even though its UE5 IoStore packs everything into a few
+multi-GB `.pak`/`.ucas` files.
 
 ## Credits & license
 
