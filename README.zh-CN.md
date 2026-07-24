@@ -157,6 +157,14 @@ Indexer.exe Hi3Helper.Plugin.NTE\publish\Release
 （`HTGameBase.dll`）和启动器入口（`NTELauncher.exe`）；此前那种没有启动器的安装会被判为*未安装*，
 直到一次修复把启动器补齐。
 
+**静默启动。** 为了不让官方启动器干扰体验，插件会在每次启动前修改启动器自己那份用户可写的设置文件
+（`NTELauncher\UserData\Config\Config.ini`）——开启 `autoLogin`、`autoRun`（无需手动点「开始游戏」即自动拉起游戏）、
+`quitWithGame`（游戏退出时启动器一并退出）与 `showAfterGameQuit=0`（游戏退出后不再弹回启动器）——随后**跟踪游戏进程**
+而非那个瞬间退出的启动器外壳（外壳在拉起游戏后约 1 秒即退出）。仅此一步即可省去多余的点击、并消除退出后启动器重新弹出的问题。
+若想在约 1 分钟的自动登录启动过程中**彻底隐藏启动器窗口**，还需要**以管理员身份运行 Collapse**：`NTEGame.exe` 被强制要求管理员权限，
+未提权的宿主进程会被 Windows UIPI 拦截、无法操作其窗口。提权后，启动过程中窗口会被隐藏，仅当日志显示需要交互式登录
+（首次运行 / 令牌过期）或超过安全超时时才会显示出来。
+
 ## 致谢与许可
 
 * 基于 [Collapse Launcher 插件 SDK](https://github.com/CollapseLauncher/Hi3Helper.Plugin.Core) 构建。

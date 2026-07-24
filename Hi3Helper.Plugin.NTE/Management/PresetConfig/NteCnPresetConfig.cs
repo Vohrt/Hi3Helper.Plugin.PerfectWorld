@@ -44,7 +44,16 @@ public partial class NteCnPresetConfig : PluginPresetConfigBase
         // point (NTELauncher.exe); the latter guarantees the account-login path is available before showing "Launch".
         InstallMarkerRelativePaths       = [InstallMarkerName, LauncherBootstrapperName],
         LauncherBootstrapperRelativePath = LauncherBootstrapperName,
-        LaunchArguments                  = ""
+        // The launcher drives everything from its own settings (patched at launch), so no extra arg is needed here.
+        // "/autoplay" is passed as a harmless hint in case the bootstrapper forwards it to NTEGame.exe.
+        LaunchArguments                  = "/autoplay",
+        // Silent-launch: patch the launcher's own settings so it auto-logs-in, auto-starts the game (no "Start"
+        // click) and quits together with the game (no reappear afterwards). Window hiding during start-up is added
+        // automatically when Collapse itself runs as administrator (NTEGame.exe is force-elevated).
+        SilentLaunch                     = true,
+        LauncherSettingsIniRelativePath  = @"NTELauncher\UserData\Config\Config.ini",
+        LauncherProcessBaseNames         = ["NTEGame", "NTELauncher", "NTEUpdate", "NTEBrowser", "NTEWebBooster", "NTEErrRep"],
+        LauncherStartupRevealTimeoutSeconds = 120
     };
 
     private static readonly WanmeiNewsConfig NteNewsConfig = new()

@@ -169,6 +169,16 @@ Clicking **Launch** then runs `NTELauncher\NTELauncher.exe` with the working dir
 A finished install now requires both the game runtime (`HTGameBase.dll`) and the launcher entry point
 (`NTELauncher.exe`); an earlier launcher-less install is reported as *not installed* until a repair fetches it.
 
+**Silent launch.** So the vendor launcher does not get in the way, the plugin patches the launcher's own
+user-writable settings (`NTELauncher\UserData\Config\Config.ini`) right before every launch — enabling
+`autoLogin`, `autoRun` (start the game with no manual *Start* click), `quitWithGame` and `showAfterGameQuit=0`
+(do not reappear after the game exits) — and then tracks the **game** process rather than the thin launcher
+shim (which exits within a second of spawning the game). This alone removes the extra click and the post-exit
+re-popup. Fully hiding the launcher window during the ~1-minute auto-login start-up additionally requires
+Collapse to run **as administrator**: `NTEGame.exe` is force-elevated, so a non-elevated host is blocked by
+Windows UIPI from touching its window. When elevated, the window is hidden during start-up and revealed only
+if the log reports that an interactive login is needed (first run / expired token) or after a safety timeout.
+
 ## Credits & license
 
 * Built on the [Collapse Launcher plugin SDK](https://github.com/CollapseLauncher/Hi3Helper.Plugin.Core).

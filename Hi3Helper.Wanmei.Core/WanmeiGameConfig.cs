@@ -58,6 +58,36 @@ public sealed class WanmeiGameConfig
     /// <summary>Command-line arguments passed to the bootstrapper when it is used, e.g. <c>/launcher</c>.</summary>
     public string LaunchArguments { get; init; } = string.Empty;
 
+    /// <summary>
+    ///     When <see langword="true"/>, the plugin drives the vendor launcher "silently": it patches the launcher's
+    ///     own settings (auto-login / auto-start game / quit-with-game) before launch and tracks the real game
+    ///     process instead of the launcher, so the user does not have to click "Start" and the launcher does not
+    ///     reappear after the game exits. Additional window hiding during start-up is applied only when the host
+    ///     process is elevated (the vendor launcher requires administrator, so a non-elevated host cannot touch its
+    ///     window). Requires <see cref="LauncherBootstrapperRelativePath"/> to be set.
+    /// </summary>
+    public bool SilentLaunch { get; init; }
+
+    /// <summary>
+    ///     Path (relative to the install root) of the vendor launcher's mutable, user-writable settings INI that
+    ///     the plugin patches for silent launch, e.g. <c>NTELauncher\UserData\Config\Config.ini</c>. This file is
+    ///     NOT integrity-checked by the launcher self-update, so patching it is safe. Empty disables patching.
+    /// </summary>
+    public string LauncherSettingsIniRelativePath { get; init; } = string.Empty;
+
+    /// <summary>
+    ///     Base names (without extension) of the vendor launcher's process tree, used to hide their windows during
+    ///     start-up and to clean them up after the game exits, e.g. <c>["NTEGame", "NTELauncher", ...]</c>.
+    /// </summary>
+    public string[] LauncherProcessBaseNames { get; init; } = [];
+
+    /// <summary>
+    ///     While hiding the launcher window during a silent start-up, reveal it after this many seconds if the game
+    ///     has still not started (a fallback so first-time/expired-token logins, which need the visible login UI,
+    ///     are not left hidden). Only relevant when the host is elevated.
+    /// </summary>
+    public int LauncherStartupRevealTimeoutSeconds { get; init; } = 120;
+
     private string PrimaryGameResCdn =>
         GameResCdnUrls is { Length: > 0 } ? GameResCdnUrls[0].TrimEnd('/') : string.Empty;
 
