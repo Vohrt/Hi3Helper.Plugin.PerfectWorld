@@ -19,6 +19,16 @@ namespace Hi3Helper.Plugin.NTE;
 
 public partial class Exports
 {
+    /// <summary>
+    /// True while a plugin-driven silent launch is in flight (from just before the vendor launcher is started until
+    /// the game has exited and the launcher tree has been cleaned up). Lets <see cref="IsGameRunningCore"/> report the
+    /// game as running throughout the launcher's lengthy start-up, before HTGame.exe actually appears.
+    /// </summary>
+    private static volatile bool _silentLaunchSessionActive;
+
+    /// <summary>Local-time ticks of the most recent silent launch, used as a fallback game start time.</summary>
+    private static long _silentLaunchStartTicks;
+
     protected override (bool IsSupported, Task<bool> Task) LaunchGameFromGameManagerCoreAsync(
         GameManagerExtension.RunGameFromGameManagerContext context, string? startArgument, bool isRunBoosted,
         ProcessPriorityClass processPriority, CancellationToken token)
@@ -32,43 +42,62 @@ public partial class Exports
 
             using (process)
             {
-                // Patch the vendor launcher's own settings so it auto-logs-in, auto-starts the game and quits
-                // together with the game. This is what removes the manual "Start" click and stops the launcher
-                // from reappearing after the game exits. It works regardless of elevation (the elevated launcher
-                // reads these settings itself), so it is the primary silencing mechanism.
-                if (silentPlan is not null && !string.IsNullOrEmpty(silentPlan.SettingsIniPath))
-                    PatchLauncherSettings(silentPlan.SettingsIniPath);
+                bool silent = silentPlan is not null;
 
-                long launcherLogStartLength = silentPlan is not null ? GetLauncherLogLength(silentPlan.LauncherDir) : 0;
-
-                try
+                // Mark the whole silent-launch session as active up-front (before the process is even started) so the
+                // UI reports "game running" for the entire vendor-launcher start-up — which for NTE spans a UAC prompt
+                // plus a 30-120 s auto-login before HTGame.exe finally appears. Without this the button would flip back
+                // to "Start" during that window (and any host that waits on "is the game running yet?" restores early).
+                if (silent)
                 {
-                    process.Start();
-                }
-                catch (Exception e)
-                {
-                    InstanceLogger.LogError(e, "[NTE::LaunchGame] Failed to start the launcher/game process.");
-                    return false;
+                    Volatile.Write(ref _silentLaunchStartTicks, DateTime.Now.Ticks);
+                    _silentLaunchSessionActive = true;
                 }
 
                 try
                 {
-                    process.PriorityBoostEnabled = isRunBoosted;
-                    process.PriorityClass = processPriority;
+                    // Patch the vendor launcher's own settings so it auto-logs-in, auto-starts the game and quits
+                    // together with the game. This is what removes the manual "Start" click and stops the launcher
+                    // from reappearing after the game exits. It works regardless of elevation (the elevated launcher
+                    // reads these settings itself), so it is the primary silencing mechanism.
+                    if (silent && !string.IsNullOrEmpty(silentPlan!.SettingsIniPath))
+                        PatchLauncherSettings(silentPlan.SettingsIniPath);
+
+                    long launcherLogStartLength = silent ? GetLauncherLogLength(silentPlan!.LauncherDir) : 0;
+
+                    try
+                    {
+                        process.Start();
+                    }
+                    catch (Exception e)
+                    {
+                        InstanceLogger.LogError(e, "[NTE::LaunchGame] Failed to start the launcher/game process.");
+                        return false;
+                    }
+
+                    try
+                    {
+                        process.PriorityBoostEnabled = isRunBoosted;
+                        process.PriorityClass = processPriority;
+                    }
+                    catch (Exception e)
+                    {
+                        InstanceLogger.LogError(e, "[NTE::LaunchGame] Failed to set process priority.");
+                    }
+
+                    _ = ReadGameLog(context, token);
+
+                    if (silent)
+                        await DriveLauncherSilentlyAsync(silentPlan!, launcherLogStartLength, token);
+                    else
+                        await process.WaitForExitAsync(token);
+
+                    return true;
                 }
-                catch (Exception e)
+                finally
                 {
-                    InstanceLogger.LogError(e, "[NTE::LaunchGame] Failed to set process priority.");
+                    if (silent) _silentLaunchSessionActive = false;
                 }
-
-                _ = ReadGameLog(context, token);
-
-                if (silentPlan is not null)
-                    await DriveLauncherSilentlyAsync(silentPlan, launcherLogStartLength, token);
-                else
-                    await process.WaitForExitAsync(token);
-
-                return true;
             }
         }
     }
@@ -79,13 +108,29 @@ public partial class Exports
         isGameRunning = false;
         gameStartTime = default;
 
-        if (!TryGetGameExecutablePath(context, out var gameExecutablePath)) return true;
+        // 1) The real game process is the source of truth whenever it exists.
+        if (TryGetGameExecutablePath(context, out var gameExecutablePath))
+        {
+            using var process = FindExecutableProcess(gameExecutablePath);
+            if (process != null)
+            {
+                isGameRunning = true;
+                // StartTime of an elevated game process may be unreadable from a non-elevated host; fall back to the
+                // recorded launch time so we never throw out of this ABI method (a throw is surfaced to the host as an
+                // error HRESULT, which makes it treat the game as "not running").
+                try { gameStartTime = process.StartTime; }
+                catch { gameStartTime = GetSilentLaunchStartTimeOrNow(); }
+                return true;
+            }
+        }
 
-        using var process = FindExecutableProcess(gameExecutablePath);
-        if (process != null)
+        // 2) While our own silent launch is mid-flight, the vendor launcher is still coming up (UAC + auto-login)
+        //    before HTGame.exe appears. Report "running" for that whole window so the UI shows "game running" instead
+        //    of flipping back to "Start" (and so the user cannot start a second, mutex-blocked instance).
+        if (_silentLaunchSessionActive)
         {
             isGameRunning = true;
-            gameStartTime = process.StartTime;
+            gameStartTime = GetSilentLaunchStartTimeOrNow();
         }
 
         return true;
@@ -98,11 +143,22 @@ public partial class Exports
 
         async Task<bool> Impl()
         {
+            // Mirror an in-flight silent launch: keep waiting through the launcher start-up until the whole session
+            // ends, rather than returning immediately just because HTGame.exe has not spawned yet.
+            while (!token.IsCancellationRequested && _silentLaunchSessionActive)
+            {
+                try { await Task.Delay(1000, token); }
+                catch { return true; }
+            }
+
             if (!TryGetGameExecutablePath(context, out var gameExecutablePath)) return true;
 
             using var process = FindExecutableProcess(gameExecutablePath);
             if (process != null)
-                await process.WaitForExitAsync(token);
+            {
+                try { await process.WaitForExitAsync(token); }
+                catch { /* cancelled */ }
+            }
 
             return true;
         }
@@ -114,14 +170,25 @@ public partial class Exports
         wasGameRunning = false;
         gameStartTime = default;
 
-        if (!TryGetGameExecutablePath(context, out var gameExecutablePath)) return true;
+        if (TryGetGameExecutablePath(context, out var gameExecutablePath))
+        {
+            using var process = FindExecutableProcess(gameExecutablePath);
+            if (process != null)
+            {
+                wasGameRunning = true;
+                try { gameStartTime = process.StartTime; }
+                catch { gameStartTime = GetSilentLaunchStartTimeOrNow(); }
 
-        using var process = FindExecutableProcess(gameExecutablePath);
-        if (process == null) return true;
+                try { process.Kill(); }
+                catch (Exception e) { InstanceLogger.LogWarning($"[NTE::KillRunningGame] Could not kill game: {e.Message}"); }
+            }
+        }
 
-        wasGameRunning = true;
-        gameStartTime = process.StartTime;
-        process.Kill();
+        // Best-effort: also tear down the vendor launcher tree so it does not linger and so its single-instance mutex
+        // is released. Killing the elevated launcher only succeeds when the host itself is elevated.
+        if (TryGetSilentLaunchInfo(context, out var launcherDir, out var baseNames))
+            TerminateLauncherTree(launcherDir, baseNames);
+
         return true;
     }
 
@@ -334,7 +401,7 @@ public partial class Exports
                 launcherLogStartLength, hideCts.Token), CancellationToken.None);
         }
 
-        Process? game = await WaitForGameProcessAsync(plan.GameExePath, plan.LauncherDir, baseNames, token);
+        Process? game = await WaitForGameAppearOrAbortAsync(plan.GameExePath, plan.LauncherDir, baseNames, token);
 
         // Stop hiding once the game is up (it now covers the screen) or if we gave up waiting.
         hideCts.Cancel();
@@ -362,25 +429,32 @@ public partial class Exports
     }
 
     /// <summary>
-    /// Waits for the tracked game binary to appear. Gives up only when the whole launcher tree has disappeared and no
-    /// game showed up (after a short start-up grace period), which means the launch was aborted.
+    /// Waits for the tracked game binary to appear. Tolerates the brief gap right after launch where the thin shim has
+    /// exited but the elevated NTEGame.exe is still coming up behind a UAC prompt: only a *sustained* absence of the
+    /// whole launcher tree (with no game) is treated as an aborted launch. During auto-login NTEGame.exe keeps the tree
+    /// alive, so the "tree dead" streak stays at zero until the game appears.
     /// </summary>
-    private static async Task<Process?> WaitForGameProcessAsync(string gameExePath, string launcherDir,
+    private static async Task<Process?> WaitForGameAppearOrAbortAsync(string gameExePath, string launcherDir,
         string[] baseNames, CancellationToken token)
     {
         var start = DateTime.UtcNow;
-        const int startupGraceSeconds = 15;
+        const int intervalMs = 1000;
+        const double abortAfterTreeDeadSeconds = 60;   // launcher tree gone this long with no game => aborted
+        const double hardCapSeconds = 15 * 60;         // absolute safety net
+        double treeDeadForSeconds = 0;
 
         while (!token.IsCancellationRequested)
         {
             var game = FindExecutableProcess(gameExePath);
             if (game is not null) return game;
 
-            var launcherAlive = baseNames.Length == 0 || IsLauncherTreeAlive(launcherDir, baseNames);
-            if (!launcherAlive && (DateTime.UtcNow - start).TotalSeconds > startupGraceSeconds)
-                return null;
+            var treeAlive = baseNames.Length > 0 && IsLauncherTreeAlive(launcherDir, baseNames);
+            treeDeadForSeconds = treeAlive ? 0 : treeDeadForSeconds + intervalMs / 1000.0;
 
-            try { await Task.Delay(500, token); }
+            if (treeDeadForSeconds >= abortAfterTreeDeadSeconds) return null;
+            if ((DateTime.UtcNow - start).TotalSeconds >= hardCapSeconds) return null;
+
+            try { await Task.Delay(intervalMs, token); }
             catch { return null; }
         }
 
@@ -612,6 +686,35 @@ public partial class Exports
         {
             InstanceLogger.LogWarning($"[NTE::PatchLauncherSettings] Could not patch launcher settings '{settingsIniPath}': {e.Message}");
         }
+    }
+
+    private static DateTime GetSilentLaunchStartTimeOrNow()
+    {
+        var ticks = Volatile.Read(ref _silentLaunchStartTicks);
+        return ticks == 0 ? DateTime.Now : new DateTime(ticks, DateTimeKind.Local);
+    }
+
+    /// <summary>
+    /// Resolves the vendor launcher directory and process-tree base names for the current game, when silent launch is
+    /// configured. Used by run detection / kill to reason about the launcher tree without starting a launch.
+    /// </summary>
+    private static bool TryGetSilentLaunchInfo(GameManagerExtension.RunGameFromGameManagerContext context,
+        out string launcherDir, out string[] baseNames)
+    {
+        launcherDir = string.Empty;
+        baseNames = [];
+
+        if (context.GameManager is not WanmeiGameManager nteManager) return false;
+
+        var config = nteManager.Config;
+        if (!config.SilentLaunch || string.IsNullOrEmpty(config.LauncherBootstrapperRelativePath)) return false;
+
+        nteManager.GetGamePath(out var gamePath);
+        if (string.IsNullOrEmpty(gamePath)) return false;
+
+        launcherDir = Path.GetDirectoryName(Path.Combine(gamePath, config.LauncherBootstrapperRelativePath)) ?? gamePath;
+        baseNames = config.LauncherProcessBaseNames ?? [];
+        return baseNames.Length > 0;
     }
 
     private static bool IsProcessElevated()

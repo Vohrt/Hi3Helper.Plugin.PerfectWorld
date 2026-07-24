@@ -173,7 +173,10 @@ A finished install now requires both the game runtime (`HTGameBase.dll`) and the
 user-writable settings (`NTELauncher\UserData\Config\Config.ini`) right before every launch — enabling
 `autoLogin`, `autoRun` (start the game with no manual *Start* click), `quitWithGame` and `showAfterGameQuit=0`
 (do not reappear after the game exits) — and then tracks the **game** process rather than the thin launcher
-shim (which exits within a second of spawning the game). This alone removes the extra click and the post-exit
+shim (which exits within a second of spawning the game). Because HTGame.exe only appears after a UAC prompt
+and a 30–120 s auto-login, the plugin reports **game running** for that whole start-up window (bridging the
+gap where the shim has exited but the game has not yet spawned), so Collapse stays minimized and the button
+matches the other plugins instead of flipping back to *Start*. This alone removes the extra click and the post-exit
 re-popup. Fully hiding the launcher window during the ~1-minute auto-login start-up additionally requires
 Collapse to run **as administrator**: `NTEGame.exe` is force-elevated, so a non-elevated host is blocked by
 Windows UIPI from touching its window. When elevated, the window is hidden during start-up and revealed only
