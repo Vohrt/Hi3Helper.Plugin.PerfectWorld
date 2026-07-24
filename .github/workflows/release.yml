@@ -1,0 +1,103 @@
+name: Release Plugin
+
+# Builds the NTE plugin, runs the Indexer to produce the Collapse release
+# bundle (per-file Brotli `.br` entries + manifest.json, packed into
+# `NTE_<version>_API-<standard>_<yyyyMMdd>.zip`), and publishes that zip to a
+# GitHub Release. Trigger it manually from the Actions tab.
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Plugin version (e.g. 1.0.0)'
+        required: true
+        type: string
+      publish_profile:
+        description: 'Publish profile to use'
+        required: true
+        type: choice
+        options:
+          - ReleasePublish-O2
+          - ReleasePublish-O1
+          - ReleaseNoReflectionPublish-O2
+          - ReleaseNoReflectionPublish-O1
+          - DebugPublish
+          - DebugNoReflectionPublish
+        default: ReleasePublish-O2
+      prerelease:
+        description: 'Mark the GitHub Release as a pre-release'
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout code (with submodules)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          submodules: recursive
+          ref: ${{ github.ref }}
+
+      - name: Setup .NET 10.0
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      # The NoReflection publish profiles must be paired with their matching
+      # build configuration (they define USELIGHTWEIGHTJSONPARSER). This mirrors
+      # the mapping in CompileAOTAndShip.bat.
+      - name: Resolve build configuration from publish profile
+        id: cfg
+        shell: pwsh
+        run: |
+          $publishProfile = "${{ github.event.inputs.publish_profile }}"
+          $cfg = switch -Wildcard ($publishProfile) {
+            'DebugNoReflection*'   { 'DebugNoReflection' }
+            'ReleaseNoReflection*' { 'ReleaseNoReflection' }
+            'Debug*'               { 'Debug' }
+            default                { 'Release' }
+          }
+          "configuration=$cfg" >> $env:GITHUB_OUTPUT
+          Write-Host "publish_profile=$publishProfile -> configuration=$cfg"
+
+      - name: Restore
+        run: dotnet restore Hi3Helper.Plugin.PerfectWorld.slnx --runtime win-x64
+
+      - name: Publish (NativeAOT)
+        # No --no-restore here: dotnet publish must re-run restore with the
+        # publish profile in context so the NativeAOT ILCompiler is pulled in.
+        # Without it the publish silently falls back to a plain self-contained
+        # build and the Indexer rejects the (non-native) plugin DLL.
+        run: >
+          dotnet publish Hi3Helper.Plugin.NTE/Hi3Helper.Plugin.NTE.csproj
+          --configuration ${{ steps.cfg.outputs.configuration }}
+          --runtime win-x64
+          /p:PublishProfile=${{ github.event.inputs.publish_profile }}
+          /p:Version=${{ github.event.inputs.version }}
+          -o ./publish_output
+
+      # Indexer.exe (committed at the repo root) reads the published plugin,
+      # writes manifest.json, Brotli-compresses every asset and packs the
+      # release zip inside ./publish_output.
+      - name: Run Indexer (manifest + .br + release zip)
+        run: .\Indexer.exe .\publish_output
+
+      - name: List produced artifacts
+        shell: pwsh
+        run: Get-ChildItem ./publish_output -Recurse -File | Select-Object Length, FullName | Format-Table -AutoSize
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: NTE@v${{ github.event.inputs.version }}
+          name: NTE v${{ github.event.inputs.version }}
+          generate_release_notes: true
+          prerelease: ${{ github.event.inputs.prerelease }}
+          files: ./publish_output/*.zip
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

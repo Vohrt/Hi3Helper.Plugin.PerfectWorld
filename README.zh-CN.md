@@ -79,6 +79,36 @@ dotnet publish Hi3Helper.Plugin.NTE/Hi3Helper.Plugin.NTE.csproj -c Release -r wi
 
 它会产出 Collapse 加载的原生 COM 动态库 **`NTE.dll`**（导出 `TryGetApiExport`）。
 
+## 生成发布包
+
+Collapse 以一个由 **`Indexer.exe`** 生成的小体积发布包来分发插件：它读取发布好的插件，写出
+`manifest.json`（插件名、作者、版本、图标以及逐资源的 MD5 表），把每个文件单独用 **Brotli** 压缩为
+`.br`，再存进一个统一命名的 zip：
+
+```
+NTE_<版本>_API-<标准版本>_<yyyyMMdd>.zip   例如 NTE_1.0.0.0_API-0.1.5.0_20260724.zip
+```
+
+### 本地
+
+`CompileAOTAndShip.bat` 在发布后已经会自动运行 Indexer，因此发布包会出现在已发布 DLL 旁边，即
+`Hi3Helper.Plugin.NTE\publish\Release\`。要针对任意发布目录手动（重新）生成：
+
+```bat
+Indexer.exe Hi3Helper.Plugin.NTE\publish\Release
+```
+
+### 在 GitHub 上（Actions）
+
+**Release Plugin** 工作流（`.github/workflows/release.yml`）会在 `windows-latest` 运行器上完成整套流程，
+并把 zip 发布到 GitHub Release。在 *Actions* 选项卡 → *Release Plugin* → *Run workflow* 触发，并填写：
+
+* **version**——例如 `1.0.0`（同时会写入程序集与清单）
+* **publish_profile**——默认 `ReleasePublish-O2`（速度优先）；带 `…NoReflection…` 的档位会构建无反射变体
+
+该运行会把 `NTE_<版本>_API-<标准版本>_<日期>.zip` 发布到一个新的、标签为 `NTE@v<版本>` 的 Release。
+无需任何额外密钥——它使用内置的 `GITHUB_TOKEN`。
+
 ## 安装到 Collapse
 
 把发布产物（已建立索引的 `publish\Release` 文件夹，内含 `NTE.dll` 及生成的清单）复制到 Collapse

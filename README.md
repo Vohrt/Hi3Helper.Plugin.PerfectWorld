@@ -80,6 +80,39 @@ dotnet publish Hi3Helper.Plugin.NTE/Hi3Helper.Plugin.NTE.csproj -c Release -r wi
 
 This produces the native COM DLL **`NTE.dll`** that Collapse loads (it exports `TryGetApiExport`).
 
+## Creating a release bundle
+
+Collapse distributes a plugin as a small bundle produced by **`Indexer.exe`**: it reads the published
+plugin, writes a `manifest.json` (plugin name, author, version, icon and a per-asset MD5 table),
+individually **Brotli-compresses** every file to `.br`, and stores them in a single zip named
+
+```
+NTE_<version>_API-<standardVersion>_<yyyyMMdd>.zip   e.g. NTE_1.0.0.0_API-0.1.5.0_20260724.zip
+```
+
+### Locally
+
+`CompileAOTAndShip.bat` already runs the Indexer after publishing, so the bundle appears next to the
+published DLL at `Hi3Helper.Plugin.NTE\publish\Release\`. To (re)generate it by hand against any
+publish folder:
+
+```bat
+Indexer.exe Hi3Helper.Plugin.NTE\publish\Release
+```
+
+### On GitHub (Actions)
+
+The **Release Plugin** workflow (`.github/workflows/release.yml`) does the whole thing on a
+`windows-latest` runner and publishes the zip to a GitHub Release. Trigger it from the *Actions* tab →
+*Release Plugin* → *Run workflow*, and provide:
+
+* **version** — e.g. `1.0.0` (also stamped into the assembly and the manifest)
+* **publish_profile** — defaults to `ReleasePublish-O2` (Speed); the `…NoReflection…` profiles build the
+  reflection-free variant
+
+The run publishes `NTE_<version>_API-<standardVersion>_<date>.zip` to a new release tagged
+`NTE@v<version>`. No extra secrets are required — it uses the built-in `GITHUB_TOKEN`.
+
 ## Installing into Collapse
 
 Copy the published output (the indexed `publish\Release` folder, containing `NTE.dll` and the generated
