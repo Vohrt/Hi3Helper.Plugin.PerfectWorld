@@ -1,5 +1,18 @@
 <Solution>
-  <Project Path="Hi3Helper.Plugin.Core/Hi3Helper.Plugin.Core.csproj" />
-  <Project Path="Hi3Helper.Wanmei.Core/Hi3Helper.Wanmei.Core.csproj" />
-  <Project Path="Hi3Helper.Plugin.NTE/Hi3Helper.Plugin.NTE.csproj" />
+  <Configurations>
+    <BuildType Name="Debug" />
+    <BuildType Name="DebugNoReflection" />
+    <BuildType Name="Release" />
+    <BuildType Name="ReleaseNoReflection" />
+    <Platform Name="x64" />
+  </Configurations>
+  <Project Path="Hi3Helper.Plugin.Core/Hi3Helper.Plugin.Core.csproj">
+    <Platform Project="x64" />
+  </Project>
+  <Project Path="Hi3Helper.Wanmei.Core/Hi3Helper.Wanmei.Core.csproj">
+    <Platform Project="x64" />
+  </Project>
+  <Project Path="Hi3Helper.Plugin.NTE/Hi3Helper.Plugin.NTE.csproj">
+    <Platform Project="x64" />
+  </Project>
 </Solution>

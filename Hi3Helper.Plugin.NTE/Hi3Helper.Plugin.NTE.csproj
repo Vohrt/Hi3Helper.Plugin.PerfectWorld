@@ -20,8 +20,18 @@
         <Copyright>Copyright 2026 $(Company)</Copyright>
         <Version>1.0.0</Version>
         <ApplicationIcon>icon.ico</ApplicationIcon>
-        <Configurations>Debug;Release</Configurations>
+        <Configurations>Debug;Release;DebugNoReflection;ReleaseNoReflection</Configurations>
         <Title>Hi3Helper.Plugin.NTE</Title>
+    </PropertyGroup>
+
+    <PropertyGroup Condition="'$(Configuration)'=='DebugNoReflection'">
+        <DefineConstants>$(DefineConstants);DEBUG;USELIGHTWEIGHTJSONPARSER</DefineConstants>
+        <Optimize>false</Optimize>
+    </PropertyGroup>
+
+    <PropertyGroup Condition="'$(Configuration)'=='ReleaseNoReflection'">
+        <DefineConstants>$(DefineConstants);USELIGHTWEIGHTJSONPARSER</DefineConstants>
+        <Optimize>true</Optimize>
     </PropertyGroup>
 
     <ItemGroup>
