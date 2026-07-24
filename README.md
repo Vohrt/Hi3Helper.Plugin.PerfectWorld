@@ -187,6 +187,17 @@ Collapse to run **as administrator**: `NTEGame.exe` is force-elevated, so a non-
 Windows UIPI from touching its window. When elevated, the window is hidden during start-up and revealed only
 if the log reports that an interactive login is needed (first run / expired token) or after a safety timeout.
 
+**Known issue — the button can stay on *game running* for a while after you quit.** NTE's vendor launcher
+owns the game process's lifetime: when you close the game it does **not** terminate `HTGame.exe` right away —
+it leaves the process running idle (with no window) and only reaps it some time later. This appears to be a
+quirk/bug of the official launcher itself (it is very slow to close the game process). Because the plugin
+tracks the real game process — the reliable signal that the game is actually up — Collapse keeps reporting
+**game running** until that process finally exits, so the button can take a while to return to *Start*. It
+**does** reset on its own once the process goes away; no action is required. If you want it back immediately,
+right-click the **异环** icon in the Windows system tray and choose exit — that force-closes the lingering
+game process at once. (The plugin deliberately does *not* kill the process early on its own, to avoid the risk
+of terminating a game that is merely still loading.)
+
 ## Credits & license
 
 * Built on the [Collapse Launcher plugin SDK](https://github.com/CollapseLauncher/Hi3Helper.Plugin.Core).
