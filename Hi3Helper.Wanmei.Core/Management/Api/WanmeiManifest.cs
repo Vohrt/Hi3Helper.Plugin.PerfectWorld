@@ -62,6 +62,45 @@ public sealed class WanmeiResEntry
 }
 
 /// <summary>
+///     A single file packed inside a <see cref="WanmeiPakEntry"/> archive. It is extracted by reading exactly
+///     <see cref="Size"/> bytes starting at byte <see cref="Offset"/> of the downloaded pak blob; the resulting
+///     bytes hash to <see cref="Md5"/>. (<c>start</c> in the manifest points at the per-entry header and is not
+///     needed for extraction.)
+/// </summary>
+public sealed class WanmeiPakFile
+{
+    /// <summary>Destination path relative to the install root (same convention as <see cref="WanmeiResEntry.Filename"/>).</summary>
+    public required string Filename { get; init; }
+
+    /// <summary>Byte offset of the file's payload inside the pak blob.</summary>
+    public required long Offset { get; init; }
+
+    /// <summary>Payload length in bytes.</summary>
+    public required long Size { get; init; }
+
+    /// <summary>MD5 of the extracted payload.</summary>
+    public required string Md5 { get; init; }
+}
+
+/// <summary>
+///     A content-addressed <c>&lt;Pak&gt;</c> archive from the decrypted <c>ResList.bin</c> manifest. The pak blob
+///     is downloaded like any other content file (keyed by <see cref="Md5"/>/<see cref="FileSize"/>) and bundles
+///     many small <see cref="Files"/> that are <em>not</em> individually addressable on the CDN — the only way to
+///     obtain them is to download the whole pak and slice each entry out of it.
+/// </summary>
+public sealed class WanmeiPakEntry
+{
+    /// <summary>Content id (<c>md5</c>) of the pak blob.</summary>
+    public required string Md5 { get; init; }
+
+    /// <summary>Size in bytes of the pak blob.</summary>
+    public required long FileSize { get; init; }
+
+    /// <summary>The files packed inside this pak.</summary>
+    public required IReadOnlyList<WanmeiPakFile> Files { get; init; }
+}
+
+/// <summary>
 ///     A single incremental patch entry from the decrypted <c>lastdiff.bin</c> manifest.
 /// </summary>
 public sealed class WanmeiPatchEntry
@@ -121,6 +160,72 @@ public static class WanmeiManifest
         }
 
         return entries;
+    }
+
+    /// <summary>
+    ///     Parses every <c>&lt;Pak&gt;</c> archive in a decrypted <c>ResList</c> manifest (inside any
+    ///     <c>&lt;Package&gt;</c>, including those nested under <c>&lt;BaseVersion&gt;</c> tag sections) together with
+    ///     the <c>&lt;Entry&gt;</c> files each one packs. These bundle the many small runtime files (native DLLs,
+    ///     anti-cheat, IoStore side-cars, …) that are <em>not</em> exposed as individually content-addressed
+    ///     <c>&lt;Res&gt;</c> entries, so they must be downloaded as part of their pak and sliced out locally.
+    /// </summary>
+    public static List<WanmeiPakEntry> ParsePackages(string xml)
+    {
+        var paks = new List<WanmeiPakEntry>();
+        var root = XDocument.Parse(xml).Root;
+        if (root == null) return paks;
+
+        foreach (var pakElement in root.DescendantsAndSelf())
+        {
+            if (!string.Equals(pakElement.Name.LocalName, "Pak", StringComparison.OrdinalIgnoreCase))
+                continue;
+
+            string? pakMd5 = (string?)pakElement.Attribute("md5");
+            string? pakSizeText = (string?)pakElement.Attribute("filesize");
+
+            if (string.IsNullOrEmpty(pakMd5) || string.IsNullOrEmpty(pakSizeText))
+                continue;
+            if (!long.TryParse(pakSizeText, NumberStyles.Integer, CultureInfo.InvariantCulture, out long pakSize))
+                continue;
+
+            var files = new List<WanmeiPakFile>();
+            foreach (var entry in pakElement.Elements())
+            {
+                if (!string.Equals(entry.Name.LocalName, "Entry", StringComparison.OrdinalIgnoreCase))
+                    continue;
+
+                string? name = (string?)entry.Attribute("name");
+                string? md5 = (string?)entry.Attribute("md5");
+                string? offsetText = (string?)entry.Attribute("offset");
+                string? sizeText = (string?)entry.Attribute("size");
+
+                if (string.IsNullOrEmpty(name) || string.IsNullOrEmpty(md5) ||
+                    string.IsNullOrEmpty(offsetText) || string.IsNullOrEmpty(sizeText))
+                    continue;
+                if (!long.TryParse(offsetText, NumberStyles.Integer, CultureInfo.InvariantCulture, out long offset) ||
+                    !long.TryParse(sizeText, NumberStyles.Integer, CultureInfo.InvariantCulture, out long size))
+                    continue;
+
+                files.Add(new WanmeiPakFile
+                {
+                    Filename = name.Replace('\\', '/'),
+                    Offset   = offset,
+                    Size     = size,
+                    Md5      = md5.ToLowerInvariant()
+                });
+            }
+
+            if (files.Count == 0) continue;
+
+            paks.Add(new WanmeiPakEntry
+            {
+                Md5      = pakMd5.ToLowerInvariant(),
+                FileSize = pakSize,
+                Files    = files
+            });
+        }
+
+        return paks;
     }
 
     /// <summary>

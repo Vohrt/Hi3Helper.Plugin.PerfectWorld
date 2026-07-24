@@ -16,18 +16,31 @@ namespace Hi3Helper.Plugin.NTE.Management.PresetConfig;
 [GeneratedComClass]
 public partial class NteCnPresetConfig : PluginPresetConfigBase
 {
-    private const string ExEcutableName = @"NTELauncher\NTEGame.exe";
+    // The real game binary (UE5 client) that the plugin actually installs and launches. The vendor's
+    // NTELauncher\NTEGame.exe bootstrapper is NOT part of the game resources, so it must never be used for
+    // install-detection.
+    private const string ExEcutableName = @"Client\WindowsNoEditor\HT\Binaries\Win64\HTGame.exe";
+
+    // A core packed runtime module: present only after a complete install (it lives inside a manifest Pak, not
+    // among the directly-addressed big files), so it distinguishes a finished install from a partial one.
+    private const string InstallMarkerName = @"Client\WindowsNoEditor\HT\Binaries\Win64\HTGameBase.dll";
+
+    // Optional vendor bootstrapper. If the user also has the official launcher files it is preferred for launch
+    // so vendor start-up (incl. anti-cheat) still runs; otherwise HTGame.exe is launched directly.
+    private const string LauncherBootstrapperName = @"NTELauncher\NTEGame.exe";
 
     private static readonly WanmeiGameConfig NteGameConfig = new()
     {
-        AppId                      = "1289",
-        GameResBranch              = "publish_PC",
-        Platform                   = "Windows",
-        GameResCdnUrls             = ["https://yhcdn1.wmupd.com/clientRes", "https://yhcdn2.wmupd.com/clientRes"],
-        LauncherBranch             = "publish_ob",
-        LauncherCdnUrls            = ["https://yhcdn1.wmupd.com/hd", "https://yhcdn2.wmupd.com/hd"],
-        GameExecutableRelativePath = ExEcutableName,
-        LaunchArguments            = "/launcher"
+        AppId                            = "1289",
+        GameResBranch                    = "publish_PC",
+        Platform                         = "Windows",
+        GameResCdnUrls                   = ["https://yhcdn1.wmupd.com/clientRes", "https://yhcdn2.wmupd.com/clientRes"],
+        LauncherBranch                   = "publish_ob",
+        LauncherCdnUrls                  = ["https://yhcdn1.wmupd.com/hd", "https://yhcdn2.wmupd.com/hd"],
+        GameExecutableRelativePath       = ExEcutableName,
+        InstallMarkerRelativePaths       = [InstallMarkerName],
+        LauncherBootstrapperRelativePath = LauncherBootstrapperName,
+        LaunchArguments                  = "/launcher"
     };
 
     private static readonly WanmeiNewsConfig NteNewsConfig = new()
@@ -48,7 +61,7 @@ public partial class NteCnPresetConfig : PluginPresetConfigBase
             string? gamePath = null;
             GameManager?.GetGamePath(out gamePath);
             if (!string.IsNullOrEmpty(gamePath))
-                return Path.Combine(gamePath, "NTELauncher", "UserData");
+                return Path.Combine(gamePath, "Client", "WindowsNoEditor", "HT", "Saved", "Logs");
             return string.Empty;
         }
     }

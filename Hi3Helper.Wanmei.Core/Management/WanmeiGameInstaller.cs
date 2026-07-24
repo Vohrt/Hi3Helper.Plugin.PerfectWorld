@@ -60,14 +60,21 @@ public partial class WanmeiGameInstaller : GameInstallerBase
         CancellationToken token)
     {
         string installPath = EnsureAndGetGamePath();
-        var manifest = await GetManifestAsync(token).ConfigureAwait(false);
+        ManifestBundle bundle = await GetManifestBundleAsync(token).ConfigureAwait(false);
 
         long downloaded = 0;
-        foreach (WanmeiResEntry entry in manifest)
+
+        foreach (WanmeiResEntry entry in bundle.Files)
         {
             string localPath = Path.Combine(installPath, entry.Filename.Replace('/', Path.DirectorySeparatorChar));
             if (File.Exists(localPath) && new FileInfo(localPath).Length == entry.FileSize)
                 downloaded += entry.FileSize;
+        }
+
+        foreach (WanmeiPakEntry pak in bundle.Paks)
+        {
+            if (await IsPakCompleteAsync(pak, installPath, verifyHash: false, token).ConfigureAwait(false))
+                downloaded += pak.FileSize;
         }
 
         return downloaded;
@@ -104,6 +111,9 @@ public partial class WanmeiGameInstaller : GameInstallerBase
         {
             string clientDir = Path.Combine(installPath, "Client");
             if (Directory.Exists(clientDir)) Directory.Delete(clientDir, true);
+
+            string pakStagingDir = Path.Combine(installPath, PakStagingDirName);
+            if (Directory.Exists(pakStagingDir)) Directory.Delete(pakStagingDir, true);
 
             string stateFile = Path.Combine(installPath, WanmeiGameManager.StateFileName);
             if (File.Exists(stateFile)) File.Delete(stateFile);

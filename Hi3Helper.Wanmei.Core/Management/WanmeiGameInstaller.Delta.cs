@@ -84,8 +84,10 @@ public partial class WanmeiGameInstaller
         if (remote == null || string.IsNullOrEmpty(remote.ResVersion))
             throw new IOException("Unable to obtain remote config.xml.");
 
-        List<WanmeiResEntry> manifest = await GetManifestAsync(token, forceRefresh: true).ConfigureAwait(false);
-        if (manifest.Count == 0)
+        ManifestBundle bundle = await GetManifestBundleAsync(token, forceRefresh: true).ConfigureAwait(false);
+        List<WanmeiResEntry> manifest = bundle.Files;
+        List<WanmeiPakEntry> paks = bundle.Paks;
+        if (manifest.Count == 0 && paks.Count == 0)
             throw new IOException("Manifest contained no file entries.");
 
         List<WanmeiPatchEntry> patches;
@@ -150,10 +152,29 @@ public partial class WanmeiGameInstaller
         int upToDate = manifest.Count - planList.Count;
         long totalTransfer = planList.Sum(p => p.IsDelta ? p.Patch!.PatchSize : p.Entry.FileSize);
 
+        // Classify packed (pak) archives. Their entries are not individually content-addressable, so a pak whose
+        // files aren't all present+correct is simply re-downloaded whole and re-extracted (no per-entry delta).
+        var paksToDownload = new ConcurrentBag<WanmeiPakEntry>();
+        await Parallel.ForEachAsync(paks,
+            new ParallelOptions { MaxDegreeOfParallelism = VerifyParallelism, CancellationToken = token },
+            async (pak, ct) =>
+            {
+                if (!await IsPakCompleteAsync(pak, installPath, verifyHash: true, ct).ConfigureAwait(false))
+                    paksToDownload.Add(pak);
+            }).ConfigureAwait(false);
+
+        int pakFilesTotal = paks.Sum(p => p.Files.Count);
+        int pakFilesToDownload = paksToDownload.Sum(p => p.Files.Count);
+        long pakTransfer = paksToDownload.Sum(p => p.FileSize);
+
+        totalTransfer += pakTransfer;
+        int totalCount = manifest.Count + pakFilesTotal;
+        int upToDateTotalCount = upToDate + (pakFilesTotal - pakFilesToDownload);
+
         int deltaCount = planList.Count(p => p.IsDelta);
         SharedStatic.InstanceLogger.LogInformation(
-            "[WanmeiInstaller] Update {Version}: {UpToDate} up-to-date, {Delta} delta, {Full} full ({Bytes} bytes).",
-            remote.ResVersion, upToDate, deltaCount, planList.Count - deltaCount, totalTransfer);
+            "[WanmeiInstaller] Update {Version}: {UpToDate} up-to-date, {Delta} delta, {Full} full, {Paks} paks ({Bytes} bytes).",
+            remote.ResVersion, upToDate, deltaCount, planList.Count - deltaCount, paksToDownload.Count, totalTransfer);
 
         // --- Update: download patches/files and apply ---------------------------------------------------
         progressStateDelegate?.Invoke(InstallProgressState.Updating);
@@ -164,14 +185,14 @@ public partial class WanmeiGameInstaller
             {
                 TotalBytesToDownload = totalTransfer,
                 DownloadedBytes      = 0,
-                TotalCountToDownload = manifest.Count,
-                DownloadedCount      = upToDate
+                TotalCountToDownload = totalCount,
+                DownloadedCount      = upToDateTotalCount
             };
             _lastReportTick = 0;
         }
 
         long downloadedBytes = 0;
-        int downloadedCount = upToDate;
+        int downloadedCount = upToDateTotalCount;
 
         void AddToTotal(long extra)
         {
@@ -218,15 +239,29 @@ public partial class WanmeiGameInstaller
                 ReportProgress(Volatile.Read(ref downloadedBytes), nc, progressDelegate, force: true);
             }).ConfigureAwait(false);
 
+        // Bring packed (pak) files up to date too (full re-download + extract of any changed pak).
+        await DownloadPaksAsync(paksToDownload, installPath,
+            onBytes: delta =>
+            {
+                long nb = Interlocked.Add(ref downloadedBytes, delta);
+                ReportProgress(nb, Volatile.Read(ref downloadedCount), progressDelegate, force: false);
+            },
+            onFilesDone: fileCount =>
+            {
+                int nc = Interlocked.Add(ref downloadedCount, fileCount);
+                ReportProgress(Volatile.Read(ref downloadedBytes), nc, progressDelegate, force: true);
+            },
+            token).ConfigureAwait(false);
+
         // --- Completion ---------------------------------------------------------------------------------
-        ReportProgress(Volatile.Read(ref downloadedBytes), manifest.Count, progressDelegate, force: true);
+        ReportProgress(Volatile.Read(ref downloadedBytes), totalCount, progressDelegate, force: true);
 
         Manager.WriteInstalledResVersion(remote.ResVersion);
         progressStateDelegate?.Invoke(InstallProgressState.Completed);
 
         SharedStatic.InstanceLogger.LogInformation(
-            "[WanmeiInstaller] Incremental update to {Version} complete ({Count} files, {Delta} via delta).",
-            remote.ResVersion, manifest.Count, deltaCount);
+            "[WanmeiInstaller] Incremental update to {Version} complete ({Count} files, {Delta} via delta, {Paks} paks).",
+            remote.ResVersion, totalCount, deltaCount, paksToDownload.Count);
     }
 
     /// <summary>

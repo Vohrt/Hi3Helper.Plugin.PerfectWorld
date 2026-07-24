@@ -49,7 +49,17 @@ public partial class WanmeiGameManager : GameManagerBase
             if (CurrentGameVersion == GameVersion.Empty) return false;
 
             string exePath = Path.Combine(CurrentGameInstallPath, _config.GameExecutableRelativePath);
-            return File.Exists(exePath);
+            if (!File.Exists(exePath)) return false;
+
+            // Require the completeness markers too, so a partial install (main executable present but the packed
+            // runtime files still missing) is correctly reported as not-yet-installed instead of ready-to-launch.
+            foreach (string marker in _config.InstallMarkerRelativePaths)
+            {
+                if (string.IsNullOrEmpty(marker)) continue;
+                if (!File.Exists(Path.Combine(CurrentGameInstallPath, marker))) return false;
+            }
+
+            return true;
         }
     }
 

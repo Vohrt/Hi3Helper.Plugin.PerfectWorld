@@ -35,12 +35,27 @@ public sealed class WanmeiGameConfig
     public required string[] LauncherCdnUrls { get; init; }
 
     /// <summary>
-    ///     Path (relative to the install root) of the executable Collapse should launch,
-    ///     e.g. <c>NTELauncher\NTEGame.exe</c>.
+    ///     Path (relative to the install root) of the executable Collapse should launch and use to detect an
+    ///     installation, e.g. <c>Client\WindowsNoEditor\HT\Binaries\Win64\HTGame.exe</c>.
     /// </summary>
     public required string GameExecutableRelativePath { get; init; }
 
-    /// <summary>Command-line arguments passed to the launched executable, e.g. <c>/launcher</c>.</summary>
+    /// <summary>
+    ///     Additional files (relative to the install root) that must also exist for the install to be considered
+    ///     complete. This guards against a partially-downloaded install (e.g. the main executable present but the
+    ///     packed runtime files missing) being mistaken for a finished one. Optional; empty by default.
+    /// </summary>
+    public string[] InstallMarkerRelativePaths { get; init; } = [];
+
+    /// <summary>
+    ///     Optional path (relative to the install root) of the vendor bootstrapper that wraps the real game
+    ///     executable, e.g. <c>NTELauncher\NTEGame.exe</c>. When present on disk it is preferred for launching
+    ///     (with <see cref="LaunchArguments"/>) so vendor start-up steps such as anti-cheat set-up still run;
+    ///     otherwise <see cref="GameExecutableRelativePath"/> is launched directly.
+    /// </summary>
+    public string LauncherBootstrapperRelativePath { get; init; } = string.Empty;
+
+    /// <summary>Command-line arguments passed to the bootstrapper when it is used, e.g. <c>/launcher</c>.</summary>
     public string LaunchArguments { get; init; } = string.Empty;
 
     private string PrimaryGameResCdn =>

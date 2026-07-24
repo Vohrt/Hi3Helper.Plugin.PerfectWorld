@@ -146,13 +146,32 @@ public partial class Exports
         string? startArgument, [NotNullWhen(true)] out Process? process)
     {
         process = null;
-        if (!TryGetGameExecutablePath(context, out var startingExecutablePath)) return false;
 
-        // NTEGame.exe is a bootstrapper that expects the "/launcher" switch (Config.ini LaunchCmdLine).
-        // Honour a user-supplied argument first, otherwise fall back to the game's configured default.
+        // Existence of the real game binary gates launch; it is also what we track for run/kill detection.
+        if (!TryGetGameExecutablePath(context, out var gameExecutablePath)) return false;
+        if (context.GameManager is not WanmeiGameManager nteManager) return false;
+
+        nteManager.GetGamePath(out var gamePath);
+        if (string.IsNullOrEmpty(gamePath)) return false;
+
+        // Default: launch the game binary (HTGame.exe) directly with only a user-supplied argument, if any.
+        var startingExecutablePath = gameExecutablePath;
         var effectiveArgument = startArgument;
-        if (string.IsNullOrEmpty(effectiveArgument) && context.GameManager is WanmeiGameManager nteManager)
-            effectiveArgument = nteManager.Config.LaunchArguments;
+
+        // Prefer the vendor bootstrapper (e.g. NTELauncher\NTEGame.exe /launcher) when it is present on disk so
+        // vendor start-up steps (including anti-cheat set-up) still run. The bootstrapper is not part of the game
+        // resources, so this only applies when the user keeps the official launcher alongside the install.
+        var bootstrapperRelativePath = nteManager.Config.LauncherBootstrapperRelativePath;
+        if (!string.IsNullOrEmpty(bootstrapperRelativePath))
+        {
+            var bootstrapperPath = Path.Combine(gamePath, bootstrapperRelativePath);
+            if (File.Exists(bootstrapperPath))
+            {
+                startingExecutablePath = bootstrapperPath;
+                if (string.IsNullOrEmpty(effectiveArgument))
+                    effectiveArgument = nteManager.Config.LaunchArguments;
+            }
+        }
 
         var startInfo = string.IsNullOrEmpty(effectiveArgument)
             ? new ProcessStartInfo(startingExecutablePath)
