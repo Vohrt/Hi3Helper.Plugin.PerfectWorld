@@ -154,13 +154,17 @@ public partial class Exports
         nteManager.GetGamePath(out var gamePath);
         if (string.IsNullOrEmpty(gamePath)) return false;
 
-        // Default: launch the game binary (HTGame.exe) directly with only a user-supplied argument, if any.
+        // Default: launch the game binary (HTGame.exe) directly with only a user-supplied argument, if any. Its
+        // working directory is its own folder, as a UE client expects.
         var startingExecutablePath = gameExecutablePath;
         var effectiveArgument = startArgument;
+        var workingDirectory = Path.GetDirectoryName(gameExecutablePath);
 
-        // Prefer the vendor bootstrapper (e.g. NTELauncher\NTEGame.exe /launcher) when it is present on disk so
-        // vendor start-up steps (including anti-cheat set-up) still run. The bootstrapper is not part of the game
-        // resources, so this only applies when the user keeps the official launcher alongside the install.
+        // Prefer the vendor launcher (NTELauncher\NTELauncher.exe) when it is present on disk: it hosts the account
+        // login UI and drives the game process (anti-cheat, pipe hand-off), so a direct HTGame.exe launch cannot log
+        // in. The plugin installs the launcher alongside the game, so this is the normal path. This mirrors the
+        // official "异环" shortcut exactly: launch NTELauncher\NTELauncher.exe with the working directory set to the
+        // install root (NOT the launcher's own folder).
         var bootstrapperRelativePath = nteManager.Config.LauncherBootstrapperRelativePath;
         if (!string.IsNullOrEmpty(bootstrapperRelativePath))
         {
@@ -168,6 +172,7 @@ public partial class Exports
             if (File.Exists(bootstrapperPath))
             {
                 startingExecutablePath = bootstrapperPath;
+                workingDirectory = gamePath;
                 if (string.IsNullOrEmpty(effectiveArgument))
                     effectiveArgument = nteManager.Config.LaunchArguments;
             }
@@ -177,7 +182,7 @@ public partial class Exports
             ? new ProcessStartInfo(startingExecutablePath)
             : new ProcessStartInfo(startingExecutablePath, effectiveArgument);
 
-        startInfo.WorkingDirectory = Path.GetDirectoryName(startingExecutablePath);
+        startInfo.WorkingDirectory = workingDirectory;
         startInfo.UseShellExecute = false;
 
         process = new Process

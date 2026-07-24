@@ -167,9 +167,14 @@ public partial class WanmeiGameInstaller
         int pakFilesToDownload = paksToDownload.Sum(p => p.Files.Count);
         long pakTransfer = paksToDownload.Sum(p => p.FileSize);
 
-        totalTransfer += pakTransfer;
-        int totalCount = manifest.Count + pakFilesTotal;
-        int upToDateTotalCount = upToDate + (pakFilesTotal - pakFilesToDownload);
+        // The vendor launcher (NTELauncher\) is required at runtime; make sure it is present/up-to-date on updates
+        // too (its self-update manifest may bump versions independently of the game resources).
+        LauncherPlan launcherPlan =
+            await PrepareLauncherPlanAsync(installPath, verifyHash: true, token).ConfigureAwait(false);
+
+        totalTransfer += pakTransfer + launcherPlan.ToDownloadZipBytes;
+        int totalCount = manifest.Count + pakFilesTotal + launcherPlan.TotalCount;
+        int upToDateTotalCount = upToDate + (pakFilesTotal - pakFilesToDownload) + launcherPlan.ExistingCount;
 
         int deltaCount = planList.Count(p => p.IsDelta);
         SharedStatic.InstanceLogger.LogInformation(
@@ -253,6 +258,20 @@ public partial class WanmeiGameInstaller
             },
             token).ConfigureAwait(false);
 
+        // Ensure the vendor launcher is installed/updated alongside the game.
+        await DownloadLauncherPlanAsync(launcherPlan, installPath,
+            onBytes: delta =>
+            {
+                long nb = Interlocked.Add(ref downloadedBytes, delta);
+                ReportProgress(nb, Volatile.Read(ref downloadedCount), progressDelegate, force: false);
+            },
+            onFileDone: fileCount =>
+            {
+                int nc = Interlocked.Add(ref downloadedCount, fileCount);
+                ReportProgress(Volatile.Read(ref downloadedBytes), nc, progressDelegate, force: true);
+            },
+            token).ConfigureAwait(false);
+
         // --- Completion ---------------------------------------------------------------------------------
         ReportProgress(Volatile.Read(ref downloadedBytes), totalCount, progressDelegate, force: true);
 
@@ -260,8 +279,8 @@ public partial class WanmeiGameInstaller
         progressStateDelegate?.Invoke(InstallProgressState.Completed);
 
         SharedStatic.InstanceLogger.LogInformation(
-            "[WanmeiInstaller] Incremental update to {Version} complete ({Count} files, {Delta} via delta, {Paks} paks).",
-            remote.ResVersion, totalCount, deltaCount, paksToDownload.Count);
+            "[WanmeiInstaller] Incremental update to {Version} complete ({Count} files, {Delta} via delta, {Paks} paks, launcher {Launcher} files).",
+            remote.ResVersion, totalCount, deltaCount, paksToDownload.Count, launcherPlan.TotalCount);
     }
 
     /// <summary>

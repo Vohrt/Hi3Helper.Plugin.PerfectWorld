@@ -157,6 +157,18 @@ All of this relies only on AOT-safe primitives (`[GeneratedRegex]`, `JsonDocumen
 `System.IO.Compression`) and pulls in no third-party dependency. Every step is best-effort: if a source is
 unreachable the plugin just omits that element and Collapse falls back to its embedded poster.
 
+**Launching & login (vendor launcher).** NTE's account login is *not* handled by the game client itself: the
+sign-in UI, anti-cheat bring-up and the token hand-off to the game all live in Perfect World's own
+`NTELauncher`. Launching `HTGame.exe` directly therefore opens the game with no login prompt. To make the game
+actually playable, the plugin **downloads the official launcher as part of install/repair** — it reads the
+launcher self-update manifest (`.../publish_ob/launcher/Version.ini` → `AllFiles.xml`), then fetches, verifies
+and inflates each of its ~670 individually zip-compressed files into `NTELauncher\` (≈237 MB; zero-length
+entries carry a bogus placeholder checksum in the manifest and are validated by emptiness instead of MD5).
+Clicking **Launch** then runs `NTELauncher\NTELauncher.exe` with the working directory set to the install root
+— exactly like the official `异环` shortcut — so the launcher shows the login UI and starts the game normally.
+A finished install now requires both the game runtime (`HTGameBase.dll`) and the launcher entry point
+(`NTELauncher.exe`); an earlier launcher-less install is reported as *not installed* until a repair fetches it.
+
 ## Credits & license
 
 * Built on the [Collapse Launcher plugin SDK](https://github.com/CollapseLauncher/Hi3Helper.Plugin.Core).

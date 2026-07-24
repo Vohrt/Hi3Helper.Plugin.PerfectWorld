@@ -147,6 +147,16 @@ Indexer.exe Hi3Helper.Plugin.NTE\publish\Release
 以上全部只依赖 AOT 安全的基础设施（`[GeneratedRegex]`、`JsonDocument`、`System.IO.Compression`），
 不引入任何第三方依赖。每一步都是尽力而为：若某个来源不可达，插件就跳过该元素，Collapse 会回退到内嵌海报。
 
+**启动与登录（依赖官方启动器）。** 异环的账号登录并不由游戏本体负责：登录界面、反作弊初始化，以及把
+登录 token 交接给游戏的整套流程，都在完美世界自己的 `NTELauncher` 里。因此直接启动 `HTGame.exe` 只会打开
+游戏却不弹登录框。为了让游戏真正可玩，插件会在**安装/修复时一并下载官方启动器**——读取启动器自更新清单
+（`.../publish_ob/launcher/Version.ini` → `AllFiles.xml`），再把其中约 670 个各自 zip 压缩的文件逐个下载、
+校验并解压到 `NTELauncher\`（约 237 MB；清单里长度为 0 的条目带有错误的占位校验和，改用「是否为空」来校验，
+而非 MD5）。之后点击**启动**会以安装根目录作为工作目录运行 `NTELauncher\NTELauncher.exe`——与官方「异环」
+快捷方式完全一致——由启动器弹出登录界面并正常拉起游戏。现在「安装完成」需要同时具备游戏运行库
+（`HTGameBase.dll`）和启动器入口（`NTELauncher.exe`）；此前那种没有启动器的安装会被判为*未安装*，
+直到一次修复把启动器补齐。
+
 ## 致谢与许可
 
 * 基于 [Collapse Launcher 插件 SDK](https://github.com/CollapseLauncher/Hi3Helper.Plugin.Core) 构建。

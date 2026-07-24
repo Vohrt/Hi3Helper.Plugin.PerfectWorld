@@ -99,4 +99,24 @@ public sealed class WanmeiGameConfig
     {
         return $"{cdnRoot.TrimEnd('/')}/{LauncherBranch}/launcher/Version.ini";
     }
+
+    /// <summary>
+    ///     Launcher file manifest for a resolved versioned directory:
+    ///     <c>.../{branch}/launcher/{versionDir}/AllFiles.xml</c> (e.g. <c>versionDir = 1.0.6.0718_2</c>).
+    /// </summary>
+    public string BuildLauncherAllFilesUrl(string cdnRoot, string versionDir)
+    {
+        return $"{cdnRoot.TrimEnd('/')}/{LauncherBranch}/launcher/{versionDir}/AllFiles.xml";
+    }
+
+    /// <summary>
+    ///     Per-file (zip-wrapped) launcher content URL:
+    ///     <c>.../{branch}/launcher/{versionDir}/{relativePath}.zip</c>. Each launcher file is stored individually
+    ///     zip-compressed on the CDN, so the download is the <c>.zip</c> and must be inflated locally.
+    /// </summary>
+    public string BuildLauncherFileZipUrl(string cdnRoot, string versionDir, string relativePath)
+    {
+        string p = relativePath.Replace('\\', '/').TrimStart('/');
+        return $"{cdnRoot.TrimEnd('/')}/{LauncherBranch}/launcher/{versionDir}/{p}.zip";
+    }
 }

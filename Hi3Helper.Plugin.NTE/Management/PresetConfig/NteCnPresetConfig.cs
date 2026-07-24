@@ -25,9 +25,11 @@ public partial class NteCnPresetConfig : PluginPresetConfigBase
     // among the directly-addressed big files), so it distinguishes a finished install from a partial one.
     private const string InstallMarkerName = @"Client\WindowsNoEditor\HT\Binaries\Win64\HTGameBase.dll";
 
-    // Optional vendor bootstrapper. If the user also has the official launcher files it is preferred for launch
-    // so vendor start-up (incl. anti-cheat) still runs; otherwise HTGame.exe is launched directly.
-    private const string LauncherBootstrapperName = @"NTELauncher\NTEGame.exe";
+    // The vendor launcher/updater. The plugin installs it (from the launcher self-update manifest) alongside the
+    // game, and launch goes THROUGH it: it hosts the Perfect World account-login UI and drives the game process
+    // (anti-cheat init + named-pipe token hand-off), which a bare HTGame.exe launch cannot do. This matches the
+    // official "异环" shortcut (NTELauncher\NTELauncher.exe, working dir = install root).
+    private const string LauncherBootstrapperName = @"NTELauncher\NTELauncher.exe";
 
     private static readonly WanmeiGameConfig NteGameConfig = new()
     {
@@ -38,9 +40,11 @@ public partial class NteCnPresetConfig : PluginPresetConfigBase
         LauncherBranch                   = "publish_ob",
         LauncherCdnUrls                  = ["https://yhcdn1.wmupd.com/hd", "https://yhcdn2.wmupd.com/hd"],
         GameExecutableRelativePath       = ExEcutableName,
-        InstallMarkerRelativePaths       = [InstallMarkerName],
+        // A finished install requires BOTH the packed game runtime (HTGameBase.dll) and the vendor launcher entry
+        // point (NTELauncher.exe); the latter guarantees the account-login path is available before showing "Launch".
+        InstallMarkerRelativePaths       = [InstallMarkerName, LauncherBootstrapperName],
         LauncherBootstrapperRelativePath = LauncherBootstrapperName,
-        LaunchArguments                  = "/launcher"
+        LaunchArguments                  = ""
     };
 
     private static readonly WanmeiNewsConfig NteNewsConfig = new()

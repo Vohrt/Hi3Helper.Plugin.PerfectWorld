@@ -144,8 +144,15 @@ public partial class WanmeiGameInstaller
                 }
             }).ConfigureAwait(false);
 
-        long totalBytes = manifest.Sum(e => e.FileSize) + paks.Sum(p => p.FileSize);
-        int totalCount = manifest.Count + paks.Sum(p => p.Files.Count);
+        // The vendor launcher (NTELauncher\) is required at runtime: it hosts the account-login UI and drives the
+        // game process, so it is installed alongside the game itself. Classify its files here so their bytes/count
+        // fold into the same progress totals as the game download.
+        LauncherPlan launcherPlan = await PrepareLauncherPlanAsync(installPath, verifyHash, token).ConfigureAwait(false);
+        existingBytes += launcherPlan.ExistingZipBytes;
+        existingCount += launcherPlan.ExistingCount;
+
+        long totalBytes = manifest.Sum(e => e.FileSize) + paks.Sum(p => p.FileSize) + launcherPlan.TotalZipBytes;
+        int totalCount = manifest.Count + paks.Sum(p => p.Files.Count) + launcherPlan.TotalCount;
 
         // --- Download -----------------------------------------------------------------------------------
         progressStateDelegate?.Invoke(verifyHash ? InstallProgressState.Updating : InstallProgressState.Download);
@@ -210,6 +217,21 @@ public partial class WanmeiGameInstaller
             },
             token).ConfigureAwait(false);
 
+        // Download + install the vendor launcher (NTELauncher\). Each launcher file is an individual zip on the CDN,
+        // so this verifies the zip MD5, inflates it and verifies the inflated MD5 before placing it.
+        await DownloadLauncherPlanAsync(launcherPlan, installPath,
+            onBytes: delta =>
+            {
+                long nb = Interlocked.Add(ref downloadedBytes, delta);
+                ReportProgress(nb, Volatile.Read(ref downloadedCount), progressDelegate, force: false);
+            },
+            onFileDone: fileCount =>
+            {
+                int nc = Interlocked.Add(ref downloadedCount, fileCount);
+                ReportProgress(Volatile.Read(ref downloadedBytes), nc, progressDelegate, force: true);
+            },
+            token).ConfigureAwait(false);
+
         // --- Completion ---------------------------------------------------------------------------------
         ReportProgress(totalBytes, totalCount, progressDelegate, force: true);
 
@@ -217,8 +239,8 @@ public partial class WanmeiGameInstaller
         progressStateDelegate?.Invoke(InstallProgressState.Completed);
 
         SharedStatic.InstanceLogger.LogInformation(
-            "[WanmeiInstaller] Reconciliation to {Version} complete ({Res} files + {Paks} paks).",
-            remote.ResVersion, manifest.Count, paks.Count);
+            "[WanmeiInstaller] Reconciliation to {Version} complete ({Res} files + {Paks} paks + launcher {Launcher} files).",
+            remote.ResVersion, manifest.Count, paks.Count, launcherPlan.TotalCount);
     }
 
     private void ReportProgress(long downloadedBytes, int downloadedCount,
@@ -241,11 +263,19 @@ public partial class WanmeiGameInstaller
     /// <summary>
     ///     Downloads a small resource fully into memory, trying every configured game-resource CDN root.
     /// </summary>
-    private async Task<byte[]> DownloadBytesWithFallbackAsync(Func<string, string> urlBuilder,
+    private Task<byte[]> DownloadBytesWithFallbackAsync(Func<string, string> urlBuilder, CancellationToken token)
+    {
+        return DownloadBytesWithFallbackAsync(Manager.Config.GameResCdnUrls, urlBuilder, token);
+    }
+
+    /// <summary>
+    ///     Downloads a small resource fully into memory, trying every CDN root in <paramref name="cdnRoots"/> in order.
+    /// </summary>
+    private async Task<byte[]> DownloadBytesWithFallbackAsync(string[] cdnRoots, Func<string, string> urlBuilder,
         CancellationToken token)
     {
         Exception? lastError = null;
-        foreach (string cdnRoot in Manager.Config.GameResCdnUrls)
+        foreach (string cdnRoot in cdnRoots)
         {
             string url = urlBuilder(cdnRoot);
             try

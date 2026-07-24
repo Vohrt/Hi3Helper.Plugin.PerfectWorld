@@ -112,6 +112,9 @@ public partial class WanmeiGameInstaller : GameInstallerBase
             string clientDir = Path.Combine(installPath, "Client");
             if (Directory.Exists(clientDir)) Directory.Delete(clientDir, true);
 
+            string launcherDir = Path.Combine(installPath, LauncherRootDirName);
+            if (Directory.Exists(launcherDir)) Directory.Delete(launcherDir, true);
+
             string pakStagingDir = Path.Combine(installPath, PakStagingDirName);
             if (Directory.Exists(pakStagingDir)) Directory.Delete(pakStagingDir, true);
 
