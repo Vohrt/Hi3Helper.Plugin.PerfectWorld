@@ -67,6 +67,46 @@ public partial class WanmeiGameInstaller
     }
 
     /// <summary>
+    ///     Builds a best-effort lookup used by the update <em>size estimate</em>: for each target file (keyed by its
+    ///     content id <c>NewMd5</c>) it records, per source file size (<c>OldSize</c>), the smallest available
+    ///     HDiffPatch delta size. This lets <see cref="GetGameDownloadedSizeAsyncInner"/> cost a changed multi-GB pak
+    ///     at its small patch size instead of a full re-download, matching what <see cref="DeltaUpdateAsync"/> really
+    ///     transfers. Returns <see langword="null"/> if the patch manifest can't be obtained (caller then falls back
+    ///     to plain size-only accounting).
+    /// </summary>
+    private async Task<Dictionary<string, Dictionary<long, long>>?> TryBuildPatchSavingsIndexAsync(
+        CancellationToken token)
+    {
+        try
+        {
+            WanmeiRemoteConfig? remote = await Manager.GetRemoteConfigAsync(false, token).ConfigureAwait(false);
+            if (remote == null || string.IsNullOrEmpty(remote.ResVersion))
+                return null;
+
+            List<WanmeiPatchEntry> patches = await GetPatchManifestAsync(remote, token).ConfigureAwait(false);
+
+            var index = new Dictionary<string, Dictionary<long, long>>(StringComparer.OrdinalIgnoreCase);
+            foreach (WanmeiPatchEntry p in patches)
+            {
+                if (!index.TryGetValue(p.NewMd5, out Dictionary<long, long>? byOldSize))
+                    index[p.NewMd5] = byOldSize = new Dictionary<long, long>();
+
+                if (!byOldSize.TryGetValue(p.OldSize, out long existing) || p.PatchSize < existing)
+                    byOldSize[p.OldSize] = p.PatchSize;
+            }
+
+            return index;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            SharedStatic.InstanceLogger.LogWarning(
+                "[WanmeiInstaller] Patch index for size estimate unavailable ({Msg}); reporting full transfer sizes.",
+                ex.Message);
+            return null;
+        }
+    }
+
+    /// <summary>
     ///     Incremental update path. Every changed file is brought to the target manifest state by applying an
     ///     HDiffPatch delta when a matching (oldMd5 → newMd5) patch smaller than a full download exists; otherwise
     ///     the target is downloaded whole. Any per-file delta failure transparently falls back to a full download,

@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.IO.Compression;
 using System.Net;
@@ -52,8 +53,19 @@ public partial class WanmeiGameInstaller : GameInstallerBase
     protected override async Task<long> GetGameSizeAsyncInner(GameInstallerKind gameInstallerKind,
         CancellationToken token)
     {
-        WanmeiRemoteConfig? remote = await Manager.GetRemoteConfigAsync(false, token).ConfigureAwait(false);
-        return remote?.ResSize ?? 0L;
+        // Return the manifest total (sum of every content-addressed file plus pak blob). This is the honest
+        // installed size and, crucially, is derived from the SAME manifest as GetGameDownloadedSizeAsyncInner so
+        // the host's "remaining = total - downloaded" is internally consistent and can never go negative. (The
+        // vendor config.xml <ResSize> omits newly added sections such as pakchunk101, which previously skewed it.)
+        ManifestBundle bundle = await GetManifestBundleAsync(token).ConfigureAwait(false);
+
+        long total = 0;
+        foreach (WanmeiResEntry entry in bundle.Files)
+            total += entry.FileSize;
+        foreach (WanmeiPakEntry pak in bundle.Paks)
+            total += pak.FileSize;
+
+        return total;
     }
 
     protected override async Task<long> GetGameDownloadedSizeAsyncInner(GameInstallerKind gameInstallerKind,
@@ -62,13 +74,40 @@ public partial class WanmeiGameInstaller : GameInstallerBase
         string installPath = EnsureAndGetGamePath();
         ManifestBundle bundle = await GetManifestBundleAsync(token).ConfigureAwait(false);
 
+        // For an update, the host displays (GetGameSize - GetGameDownloadedSize) as the amount left to transfer.
+        // The vendor ships block-level HDiffPatch deltas (lastdiff.bin), so a changed multi-GB pak only needs a
+        // small patch rather than a full re-download. Credit those savings here so the shown figure matches what
+        // StartUpdateAsync actually downloads. Without this every changed pak is costed at full size and a small
+        // incremental update looks like a tens-of-GB download. The index is best-effort: if the patch manifest is
+        // unavailable it stays null and we fall back to the plain size-only accounting.
+        Dictionary<string, Dictionary<long, long>>? patchByNewMd5 =
+            gameInstallerKind == GameInstallerKind.Update
+                ? await TryBuildPatchSavingsIndexAsync(token).ConfigureAwait(false)
+                : null;
+
         long downloaded = 0;
 
         foreach (WanmeiResEntry entry in bundle.Files)
         {
             string localPath = Path.Combine(installPath, entry.Filename.Replace('/', Path.DirectorySeparatorChar));
-            if (File.Exists(localPath) && new FileInfo(localPath).Length == entry.FileSize)
+            if (!File.Exists(localPath))
+                continue;
+
+            long localSize = new FileInfo(localPath).Length;
+            if (localSize == entry.FileSize)
+            {
+                // Size already matches the target revision: treat as present (no hashing on the size query path).
                 downloaded += entry.FileSize;
+            }
+            else if (patchByNewMd5 != null &&
+                     patchByNewMd5.TryGetValue(entry.Md5, out Dictionary<long, long>? byOldSize) &&
+                     byOldSize.TryGetValue(localSize, out long patchSize) &&
+                     patchSize < entry.FileSize)
+            {
+                // A delta turns the local (previous) revision into this file: only the patch bytes transfer, so the
+                // remainder (FileSize - patchSize) counts as already "downloaded".
+                downloaded += entry.FileSize - patchSize;
+            }
         }
 
         foreach (WanmeiPakEntry pak in bundle.Paks)

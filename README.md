@@ -140,6 +140,11 @@ a full content-addressed download, and if the whole `lastdiff` manifest is unava
 reconciliation is used. This keeps NTE updates small even though its UE5 IoStore packs everything into a few
 multi-GB `.pak`/`.ucas` files.
 
+The **reported update size** reflects this too: when computing the remaining download for an update,
+`Wanmei.Core` credits each available delta (it subtracts the patch size from every changed file that has a
+usable patch), so the figure shown before you start matches the true, small incremental transfer instead of
+the full size of every changed multi-GB pak.
+
 **Launcher content (background, news, banners, social).** The plugin also fills Collapse's home screen
 straight from Perfect World's live web sources — `pw_sdk` has no public launcher-media JSON API, so each
 element is derived from what the official launcher itself uses:
