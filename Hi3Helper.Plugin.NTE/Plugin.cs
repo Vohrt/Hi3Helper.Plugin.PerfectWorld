@@ -18,7 +18,7 @@ public partial class NtePlugin : PluginBase
         new NteCnPresetConfig()
     ];
 
-    private static DateTime _pluginCreationDate = new(2026, 02, 01, 00, 00, 0, DateTimeKind.Utc);
+    private static DateTime _pluginCreationDate = new(2026, 07, 25, 18, 00, 0, DateTimeKind.Utc);
 
     public override void GetPluginName(out string result)
     {
@@ -32,7 +32,7 @@ public partial class NtePlugin : PluginBase
 
     public override void GetPluginAuthor(out string result)
     {
-        result = "CollapsePlugin";
+        result = "Voheart";
     }
 
     public override unsafe void GetPluginCreationDate(out DateTime* result)
