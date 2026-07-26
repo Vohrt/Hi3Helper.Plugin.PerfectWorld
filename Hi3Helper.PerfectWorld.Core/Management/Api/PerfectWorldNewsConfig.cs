@@ -1,11 +1,11 @@
-namespace Hi3Helper.Wanmei.Core.Management.Api;
+namespace Hi3Helper.PerfectWorld.Core.Management.Api;
 
 /// <summary>
 ///     Per-game configuration for the news / carousel / social-media provider. These endpoints live on
 ///     the publisher's marketing website (not the pw_sdk resource CDN) and are game-specific, so a thin
-///     plugin supplies them and the core stays reusable across Wanmei titles.
+///     plugin supplies them and the core stays reusable across Perfect World titles.
 /// </summary>
-public sealed class WanmeiNewsConfig
+public sealed class PerfectWorldNewsConfig
 {
     /// <summary>
     ///     The launcher news web page that embeds the news list and social-media (QR) sidebar, e.g.

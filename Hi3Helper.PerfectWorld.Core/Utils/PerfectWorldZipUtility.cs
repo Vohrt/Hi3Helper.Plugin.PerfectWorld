@@ -3,14 +3,14 @@ using System.IO;
 using System.IO.Compression;
 using System.Linq;
 
-namespace Hi3Helper.Wanmei.Core.Utils;
+namespace Hi3Helper.PerfectWorld.Core.Utils;
 
 /// <summary>
 ///     Small helper for reading the single-entry <c>*.zip</c> blobs served by the pw_sdk launcher CDN.
 ///     Each launcher asset (e.g. everything under <c>bgimgs/</c>) is stored zip-compressed and wraps
 ///     exactly one file.
 /// </summary>
-internal static class WanmeiZipUtility
+internal static class PerfectWorldZipUtility
 {
     /// <summary>
     ///     Extracts one entry from an in-memory zip. When <paramref name="entryName"/> is supplied the

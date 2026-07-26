@@ -12,18 +12,18 @@ using System.Threading.Tasks;
 using Hi3Helper.Plugin.Core;
 using Hi3Helper.Plugin.Core.Management;
 using Hi3Helper.Plugin.Core.Utility;
-using Hi3Helper.Wanmei.Core.Management.Api;
-using Hi3Helper.Wanmei.Core.Utils;
+using Hi3Helper.PerfectWorld.Core.Management.Api;
+using Hi3Helper.PerfectWorld.Core.Utils;
 using Microsoft.Extensions.Logging;
 
-namespace Hi3Helper.Wanmei.Core.Management;
+namespace Hi3Helper.PerfectWorld.Core.Management;
 
 /// <summary>
-///     <see cref="IGameInstaller"/> implementation for Perfect World (Wanmei) pw_sdk titles. Downloads the
+///     <see cref="IGameInstaller"/> implementation for Perfect World pw_sdk titles. Downloads the
 ///     content-addressed game resources described by the decrypted <c>ResList</c> manifest.
 /// </summary>
 [GeneratedComClass]
-public partial class WanmeiGameInstaller : GameInstallerBase
+public partial class PerfectWorldGameInstaller : GameInstallerBase
 {
     private const int DownloadParallelism = 4;
     private const int VerifyParallelism = 8;
@@ -31,7 +31,7 @@ public partial class WanmeiGameInstaller : GameInstallerBase
 
     private readonly HttpClient _downloadHttpClient;
 
-    public WanmeiGameInstaller(IGameManager? gameManager) : base(gameManager)
+    public PerfectWorldGameInstaller(IGameManager? gameManager) : base(gameManager)
     {
         _downloadHttpClient = new PluginHttpClientBuilder()
             .SetAllowedDecompression(DecompressionMethods.None)
@@ -41,9 +41,9 @@ public partial class WanmeiGameInstaller : GameInstallerBase
             .Create();
     }
 
-    private WanmeiGameManager Manager =>
-        GameManager as WanmeiGameManager ??
-        throw new InvalidOperationException("GameManager is not a WanmeiGameManager.");
+    private PerfectWorldGameManager Manager =>
+        GameManager as PerfectWorldGameManager ??
+        throw new InvalidOperationException("GameManager is not a PerfectWorldGameManager.");
 
     protected override async Task<int> InitAsync(CancellationToken token)
     {
@@ -60,9 +60,9 @@ public partial class WanmeiGameInstaller : GameInstallerBase
         ManifestBundle bundle = await GetManifestBundleAsync(token).ConfigureAwait(false);
 
         long total = 0;
-        foreach (WanmeiResEntry entry in bundle.Files)
+        foreach (PerfectWorldResEntry entry in bundle.Files)
             total += entry.FileSize;
-        foreach (WanmeiPakEntry pak in bundle.Paks)
+        foreach (PerfectWorldPakEntry pak in bundle.Paks)
             total += pak.FileSize;
 
         return total;
@@ -87,7 +87,7 @@ public partial class WanmeiGameInstaller : GameInstallerBase
 
         long downloaded = 0;
 
-        foreach (WanmeiResEntry entry in bundle.Files)
+        foreach (PerfectWorldResEntry entry in bundle.Files)
         {
             string localPath = Path.Combine(installPath, entry.Filename.Replace('/', Path.DirectorySeparatorChar));
             if (!File.Exists(localPath))
@@ -110,7 +110,7 @@ public partial class WanmeiGameInstaller : GameInstallerBase
             }
         }
 
-        foreach (WanmeiPakEntry pak in bundle.Paks)
+        foreach (PerfectWorldPakEntry pak in bundle.Paks)
         {
             if (await IsPakCompleteAsync(pak, installPath, verifyHash: false, token).ConfigureAwait(false))
                 downloaded += pak.FileSize;
@@ -157,12 +157,15 @@ public partial class WanmeiGameInstaller : GameInstallerBase
             string pakStagingDir = Path.Combine(installPath, PakStagingDirName);
             if (Directory.Exists(pakStagingDir)) Directory.Delete(pakStagingDir, true);
 
-            string stateFile = Path.Combine(installPath, WanmeiGameManager.StateFileName);
+            string stateFile = Path.Combine(installPath, PerfectWorldGameManager.StateFileName);
             if (File.Exists(stateFile)) File.Delete(stateFile);
+
+            string legacyStateFile = Path.Combine(installPath, PerfectWorldGameManager.LegacyStateFileName);
+            if (File.Exists(legacyStateFile)) File.Delete(legacyStateFile);
         }
         catch (Exception ex)
         {
-            SharedStatic.InstanceLogger.LogError("[WanmeiInstaller] Uninstall failed: {Msg}", ex.Message);
+            SharedStatic.InstanceLogger.LogError("[PerfectWorldInstaller] Uninstall failed: {Msg}", ex.Message);
         }
 
         return Task.CompletedTask;
@@ -174,7 +177,7 @@ public partial class WanmeiGameInstaller : GameInstallerBase
     private async Task DownloadContentFileAsync(string md5, long expectedSize, string tempPath,
         CancellationToken token, Action<long> onProgress)
     {
-        WanmeiGameConfig config = Manager.Config;
+        PerfectWorldGameConfig config = Manager.Config;
         Exception? lastError = null;
 
         for (int cdnIndex = 0; cdnIndex < config.GameResCdnUrls.Length; cdnIndex++)
@@ -189,7 +192,7 @@ public partial class WanmeiGameInstaller : GameInstallerBase
             {
                 lastError = ex;
                 SharedStatic.InstanceLogger.LogWarning(
-                    "[WanmeiInstaller] CDN #{Index} failed for {Md5}: {Msg}", cdnIndex, md5, ex.Message);
+                    "[PerfectWorldInstaller] CDN #{Index} failed for {Md5}: {Msg}", cdnIndex, md5, ex.Message);
             }
         }
 

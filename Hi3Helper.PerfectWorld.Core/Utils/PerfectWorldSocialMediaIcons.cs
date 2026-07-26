@@ -1,10 +1,10 @@
 using System;
 using System.Text;
 
-namespace Hi3Helper.Wanmei.Core.Utils;
+namespace Hi3Helper.PerfectWorld.Core.Utils;
 
 /// <summary>
-///     Self-contained social-media icon set for Wanmei (Perfect World) launcher pages.
+///     Self-contained social-media icon set for Perfect World launcher pages.
 ///     <para>
 ///         The official web launcher renders its social icons via a CSS sprite, so no standalone icon
 ///         image is exposed by the page. To stay dependency-free and NativeAOT-friendly (no embedded
@@ -18,7 +18,7 @@ namespace Hi3Helper.Wanmei.Core.Utils;
 ///         local <c>.svg</c> file.
 ///     </para>
 /// </summary>
-internal static class WanmeiSocialMediaIcons
+internal static class PerfectWorldSocialMediaIcons
 {
     /// <summary>Resolve a human-friendly display name for a platform key (the <c>icon-XXX</c> class).</summary>
     internal static string ResolveDisplayName(string? key)

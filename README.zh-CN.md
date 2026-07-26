@@ -18,9 +18,9 @@
 ```
 Hi3Helper.Plugin.PerfectWorld/
 ├── Hi3Helper.Plugin.Core/        # Collapse 插件 SDK（git 子模块，指向上游官方仓库）
-├── Hi3Helper.Wanmei.Core/        # 可复用的“完美世界”发行商核心（程序集：Wanmei.Core）
+├── Hi3Helper.PerfectWorld.Core/  # 可复用的“完美世界”发行商核心（程序集：PerfectWorld.Core）
 │   ├── Utils/PatcherXml0.cs      #   PatcherXML0 清单解码器（AES-128-CBC + zlib）
-│   ├── WanmeiGameConfig.cs       #   每游戏配置 + CDN URL 构造
+│   ├── PerfectWorldGameConfig.cs #   每游戏配置 + CDN URL 构造
 │   └── Management/               #   版本管理器 + 内容寻址下载与 HDiffPatch 增量引擎
 ├── Hi3Helper.Plugin.NTE/         # 异环的薄插件（程序集：NTE）
 │   ├── Management/PresetConfig/  #   异环专属数据（App ID、CDN、可执行文件路径、启动参数）
@@ -32,7 +32,7 @@ Hi3Helper.Plugin.PerfectWorld/
 
 设计沿用官方插件仓库的思路：在**可复用的发行商核心**之上放一个只含游戏专属数据的**薄插件**。
 要支持另一款 `pw_sdk` 游戏，通常只需新建一个薄插件工程，提供它的 App ID、CDN 域名和启动参数即可，
-其余逻辑由 `Wanmei.Core` 负责。
+其余逻辑由 `PerfectWorld.Core` 负责。
 
 ## 环境要求
 
@@ -122,10 +122,10 @@ Indexer.exe Hi3Helper.Plugin.NTE\publish\Release
 * **密钥** = `"<appId>@Patcher"` 用 `'0'` 右补齐到 16 字节（异环 → `1289@Patcher0000`）。
 * **IV**  = `"PatcherSDK"` 用 `'0'` 右补齐到 16 字节（`PatcherSDK000000`）。
 
-`Wanmei.Core` 会拉取 `config.xml`，下载并解密带版本号的 `ResList.bin.zip`，再从
+`PerfectWorld.Core` 会拉取 `config.xml`，下载并解密带版本号的 `ResList.bin.zip`，再从
 `.../publish_PC/Res/<md5[0]>/<md5>.<filesize>` 下载每个内容寻址文件并校验 MD5。
 
-**增量更新（HDiffPatch）。** 更新时，`Wanmei.Core` 还会拉取并解密带版本号的 `lastdiff.bin` 补丁清单。
+**增量更新（HDiffPatch）。** 更新时，`PerfectWorld.Core` 还会拉取并解密带版本号的 `lastdiff.bin` 补丁清单。
 对每个发生变化的文件，它会查找一个二进制差分补丁——其源 MD5 与本地文件一致、目标 MD5 与目标文件一致；
 若存在这样的补丁（且体积小于整文件下载），就只下载这个很小的 `HDIFF13` 补丁块，用托管的
 [`SharpHDiffPatch.Core`](https://github.com/CollapseLauncher/SharpHDiffPatch.Core) 打补丁器在本地应用，
@@ -133,7 +133,7 @@ Indexer.exe Hi3Helper.Plugin.NTE\publish\Release
 若整个 `lastdiff` 清单不可用，则回退到经典的全文件对账。这样即便异环的 UE5 IoStore 把所有内容打包进
 几个数 GB 的 `.pak`/`.ucas` 大文件，增量更新的下载量依然很小。
 
-**更新体积的显示**也会据此计算：在估算某次更新的剩余下载量时，`Wanmei.Core` 会为每个存在可用补丁的变化文件
+**更新体积的显示**也会据此计算：在估算某次更新的剩余下载量时，`PerfectWorld.Core` 会为每个存在可用补丁的变化文件
 扣减相应的补丁体积，因此开始更新前显示的数值就是真实的、很小的增量传输量，而不是每个变化的数 GB 大文件的完整体积。
 
 **启动器内容（背景、资讯、轮播、社媒）。** 插件还会直接用完美世界的线上网页数据填充 Collapse 的主页——

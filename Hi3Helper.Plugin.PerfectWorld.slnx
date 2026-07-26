@@ -9,7 +9,7 @@
   <Project Path="Hi3Helper.Plugin.Core/Hi3Helper.Plugin.Core.csproj">
     <Platform Project="x64" />
   </Project>
-  <Project Path="Hi3Helper.Wanmei.Core/Hi3Helper.Wanmei.Core.csproj">
+  <Project Path="Hi3Helper.PerfectWorld.Core/Hi3Helper.PerfectWorld.Core.csproj">
     <Platform Project="x64" />
   </Project>
   <Project Path="Hi3Helper.Plugin.NTE/Hi3Helper.Plugin.NTE.csproj">

@@ -3,14 +3,14 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.Xml.Linq;
 
-namespace Hi3Helper.Wanmei.Core.Management.Api;
+namespace Hi3Helper.PerfectWorld.Core.Management.Api;
 
 /// <summary>
 ///     A single entry in the launcher self-update manifest (<c>AllFiles.xml</c>). Every launcher file is stored
 ///     individually zip-compressed on the CDN, so <see cref="ZipMd5"/>/<see cref="ZipSize"/> describe the blob that
 ///     is downloaded and <see cref="Md5"/>/<see cref="Size"/> describe the file after inflation.
 /// </summary>
-public sealed class WanmeiLauncherFile
+public sealed class PerfectWorldLauncherFile
 {
     /// <summary>Path relative to the launcher root (<c>NTELauncher\</c>), forward-slashed, without a leading slash.</summary>
     public required string Path { get; init; }
@@ -29,7 +29,7 @@ public sealed class WanmeiLauncherFile
 }
 
 /// <summary>Parsed launcher self-update manifest.</summary>
-public sealed class WanmeiLauncherManifest
+public sealed class PerfectWorldLauncherManifest
 {
     /// <summary>Versioned directory segment used in file URLs, e.g. <c>1.0.6.0718_2</c>.</summary>
     public required string VersionDir { get; init; }
@@ -37,11 +37,11 @@ public sealed class WanmeiLauncherManifest
     /// <summary>Human-readable product version, e.g. <c>1.0.6.0718_2</c>.</summary>
     public required string ProductVersion { get; init; }
 
-    public required IReadOnlyList<WanmeiLauncherFile> Files { get; init; }
+    public required IReadOnlyList<PerfectWorldLauncherFile> Files { get; init; }
 }
 
 /// <summary>Parsers for the launcher self-update manifests (<c>Version.ini</c> and <c>AllFiles.xml</c>).</summary>
-public static class WanmeiLauncherManifestParser
+public static class PerfectWorldLauncherManifestParser
 {
     /// <summary>
     ///     Parses the <c>[VERSION]</c> section of a launcher <c>Version.ini</c>, returning the <c>FileListURL</c>
@@ -87,11 +87,11 @@ public static class WanmeiLauncherManifestParser
     }
 
     /// <summary>
-    ///     Parses an <c>AllFiles.xml</c> launcher manifest into a strongly-typed <see cref="WanmeiLauncherManifest"/>.
+    ///     Parses an <c>AllFiles.xml</c> launcher manifest into a strongly-typed <see cref="PerfectWorldLauncherManifest"/>.
     /// </summary>
-    public static WanmeiLauncherManifest ParseAllFiles(string xml, string versionDir)
+    public static PerfectWorldLauncherManifest ParseAllFiles(string xml, string versionDir)
     {
-        var files = new List<WanmeiLauncherFile>();
+        var files = new List<PerfectWorldLauncherFile>();
         XElement? root = XDocument.Parse(xml.TrimStart('\uFEFF')).Root;
 
         string productVersion = versionDir;
@@ -126,7 +126,7 @@ public static class WanmeiLauncherManifestParser
                     !long.TryParse(zipSizeText, NumberStyles.Integer, CultureInfo.InvariantCulture, out long zipSize))
                     continue;
 
-                files.Add(new WanmeiLauncherFile
+                files.Add(new PerfectWorldLauncherFile
                 {
                     Path    = path.Replace('\\', '/').TrimStart('/'),
                     Md5     = md5.ToLowerInvariant(),
@@ -137,7 +137,7 @@ public static class WanmeiLauncherManifestParser
             }
         }
 
-        return new WanmeiLauncherManifest
+        return new PerfectWorldLauncherManifest
         {
             VersionDir     = versionDir,
             ProductVersion = productVersion,

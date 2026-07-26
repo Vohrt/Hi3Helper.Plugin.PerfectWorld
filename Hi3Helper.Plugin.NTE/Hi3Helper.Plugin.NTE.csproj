@@ -36,7 +36,7 @@
 
     <ItemGroup>
         <ProjectReference Include="..\Hi3Helper.Plugin.Core\Hi3Helper.Plugin.Core.csproj"/>
-        <ProjectReference Include="..\Hi3Helper.Wanmei.Core\Hi3Helper.Wanmei.Core.csproj"/>
+        <ProjectReference Include="..\Hi3Helper.PerfectWorld.Core\Hi3Helper.PerfectWorld.Core.csproj"/>
     </ItemGroup>
 
 </Project>

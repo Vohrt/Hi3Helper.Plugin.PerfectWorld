@@ -3,13 +3,13 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.Xml.Linq;
 
-namespace Hi3Helper.Wanmei.Core.Management.Api;
+namespace Hi3Helper.PerfectWorld.Core.Management.Api;
 
 /// <summary>
 ///     Parsed content of the plaintext game-resource <c>config.xml</c> entry point
 ///     (<c>.../{branch}/Version/{platform}/config.xml</c>).
 /// </summary>
-public sealed class WanmeiRemoteConfig
+public sealed class PerfectWorldRemoteConfig
 {
     public string ResVersion { get; init; } = string.Empty;
     public long ResSize { get; init; }
@@ -23,7 +23,7 @@ public sealed class WanmeiRemoteConfig
     /// <summary>MD5 of <c>lastdiff.bin</c> (integrity check for the incremental manifest).</summary>
     public string DiffHash { get; init; } = string.Empty;
 
-    public static WanmeiRemoteConfig Parse(string xml)
+    public static PerfectWorldRemoteConfig Parse(string xml)
     {
         var root = XDocument.Parse(xml).Root
                    ?? throw new InvalidOperationException("config.xml has no root element.");
@@ -32,7 +32,7 @@ public sealed class WanmeiRemoteConfig
 
         long.TryParse(extraValue("ResSize"), NumberStyles.Integer, CultureInfo.InvariantCulture, out long resSize);
 
-        return new WanmeiRemoteConfig
+        return new PerfectWorldRemoteConfig
         {
             ResVersion = extraValue("ResVersion") ?? string.Empty,
             ResSize    = resSize,
@@ -54,7 +54,7 @@ public sealed class WanmeiRemoteConfig
 /// <summary>
 ///     A single content-addressed file entry from the decrypted <c>ResList.bin</c> manifest.
 /// </summary>
-public sealed class WanmeiResEntry
+public sealed class PerfectWorldResEntry
 {
     public required string Filename { get; init; }
     public required long FileSize { get; init; }
@@ -62,14 +62,14 @@ public sealed class WanmeiResEntry
 }
 
 /// <summary>
-///     A single file packed inside a <see cref="WanmeiPakEntry"/> archive. It is extracted by reading exactly
+///     A single file packed inside a <see cref="PerfectWorldPakEntry"/> archive. It is extracted by reading exactly
 ///     <see cref="Size"/> bytes starting at byte <see cref="Offset"/> of the downloaded pak blob; the resulting
 ///     bytes hash to <see cref="Md5"/>. (<c>start</c> in the manifest points at the per-entry header and is not
 ///     needed for extraction.)
 /// </summary>
-public sealed class WanmeiPakFile
+public sealed class PerfectWorldPakFile
 {
-    /// <summary>Destination path relative to the install root (same convention as <see cref="WanmeiResEntry.Filename"/>).</summary>
+    /// <summary>Destination path relative to the install root (same convention as <see cref="PerfectWorldResEntry.Filename"/>).</summary>
     public required string Filename { get; init; }
 
     /// <summary>Byte offset of the file's payload inside the pak blob.</summary>
@@ -88,7 +88,7 @@ public sealed class WanmeiPakFile
 ///     many small <see cref="Files"/> that are <em>not</em> individually addressable on the CDN — the only way to
 ///     obtain them is to download the whole pak and slice each entry out of it.
 /// </summary>
-public sealed class WanmeiPakEntry
+public sealed class PerfectWorldPakEntry
 {
     /// <summary>Content id (<c>md5</c>) of the pak blob.</summary>
     public required string Md5 { get; init; }
@@ -97,13 +97,13 @@ public sealed class WanmeiPakEntry
     public required long FileSize { get; init; }
 
     /// <summary>The files packed inside this pak.</summary>
-    public required IReadOnlyList<WanmeiPakFile> Files { get; init; }
+    public required IReadOnlyList<PerfectWorldPakFile> Files { get; init; }
 }
 
 /// <summary>
 ///     A single incremental patch entry from the decrypted <c>lastdiff.bin</c> manifest.
 /// </summary>
-public sealed class WanmeiPatchEntry
+public sealed class PerfectWorldPatchEntry
 {
     /// <summary>Content id (<c>md5</c>) of the file to patch from.</summary>
     public required string OldMd5 { get; init; }
@@ -124,15 +124,15 @@ public sealed class WanmeiPatchEntry
 /// <summary>
 ///     Parsers for the decrypted pw_sdk XML manifests.
 /// </summary>
-public static class WanmeiManifest
+public static class PerfectWorldManifest
 {
     /// <summary>
     ///     Parses a decrypted <c>ResList</c> manifest and returns every content-addressed file entry
     ///     (any <c>&lt;Res&gt;</c> element carrying <c>filename</c>, <c>filesize</c> and <c>md5</c> attributes).
     /// </summary>
-    public static List<WanmeiResEntry> ParseResList(string xml)
+    public static List<PerfectWorldResEntry> ParseResList(string xml)
     {
-        var entries = new List<WanmeiResEntry>();
+        var entries = new List<PerfectWorldResEntry>();
         var root = XDocument.Parse(xml).Root;
         if (root == null) return entries;
 
@@ -151,7 +151,7 @@ public static class WanmeiManifest
             if (!long.TryParse(sizeText, NumberStyles.Integer, CultureInfo.InvariantCulture, out long size))
                 continue;
 
-            entries.Add(new WanmeiResEntry
+            entries.Add(new PerfectWorldResEntry
             {
                 Filename = filename.Replace('\\', '/'),
                 FileSize = size,
@@ -169,9 +169,9 @@ public static class WanmeiManifest
     ///     anti-cheat, IoStore side-cars, …) that are <em>not</em> exposed as individually content-addressed
     ///     <c>&lt;Res&gt;</c> entries, so they must be downloaded as part of their pak and sliced out locally.
     /// </summary>
-    public static List<WanmeiPakEntry> ParsePackages(string xml)
+    public static List<PerfectWorldPakEntry> ParsePackages(string xml)
     {
-        var paks = new List<WanmeiPakEntry>();
+        var paks = new List<PerfectWorldPakEntry>();
         var root = XDocument.Parse(xml).Root;
         if (root == null) return paks;
 
@@ -188,7 +188,7 @@ public static class WanmeiManifest
             if (!long.TryParse(pakSizeText, NumberStyles.Integer, CultureInfo.InvariantCulture, out long pakSize))
                 continue;
 
-            var files = new List<WanmeiPakFile>();
+            var files = new List<PerfectWorldPakFile>();
             foreach (var entry in pakElement.Elements())
             {
                 if (!string.Equals(entry.Name.LocalName, "Entry", StringComparison.OrdinalIgnoreCase))
@@ -206,7 +206,7 @@ public static class WanmeiManifest
                     !long.TryParse(sizeText, NumberStyles.Integer, CultureInfo.InvariantCulture, out long size))
                     continue;
 
-                files.Add(new WanmeiPakFile
+                files.Add(new PerfectWorldPakFile
                 {
                     Filename = name.Replace('\\', '/'),
                     Offset   = offset,
@@ -217,7 +217,7 @@ public static class WanmeiManifest
 
             if (files.Count == 0) continue;
 
-            paks.Add(new WanmeiPakEntry
+            paks.Add(new PerfectWorldPakEntry
             {
                 Md5      = pakMd5.ToLowerInvariant(),
                 FileSize = pakSize,
@@ -231,9 +231,9 @@ public static class WanmeiManifest
     /// <summary>
     ///     Parses a decrypted <c>lastdiff</c> manifest (<c>&lt;PatchList&gt;&lt;Patch .../&gt;</c>).
     /// </summary>
-    public static List<WanmeiPatchEntry> ParsePatchList(string xml)
+    public static List<PerfectWorldPatchEntry> ParsePatchList(string xml)
     {
-        var entries = new List<WanmeiPatchEntry>();
+        var entries = new List<PerfectWorldPatchEntry>();
         var root = XDocument.Parse(xml).Root;
         if (root == null) return entries;
 
@@ -247,7 +247,7 @@ public static class WanmeiManifest
                 !TrySplitContentId((string?)element.Attribute("patch"), out string patchMd5, out long patchSize))
                 continue;
 
-            entries.Add(new WanmeiPatchEntry
+            entries.Add(new PerfectWorldPatchEntry
             {
                 OldMd5    = oldMd5,
                 OldSize   = oldSize,

@@ -5,12 +5,12 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Hi3Helper.Plugin.Core;
-using Hi3Helper.Wanmei.Core.Management.Api;
+using Hi3Helper.PerfectWorld.Core.Management.Api;
 using Microsoft.Extensions.Logging;
 
-namespace Hi3Helper.Wanmei.Core.Management;
+namespace Hi3Helper.PerfectWorld.Core.Management;
 
-public partial class WanmeiGameInstaller
+public partial class PerfectWorldGameInstaller
 {
     /// <summary>
     ///     Returns <c>true</c> when every file packed inside <paramref name="pak"/> is already present on disk with
@@ -18,10 +18,10 @@ public partial class WanmeiGameInstaller
     ///     atomic: if any packed file is missing or wrong, the whole pak must be re-downloaded because its entries
     ///     are not individually addressable on the CDN.
     /// </summary>
-    private static async Task<bool> IsPakCompleteAsync(WanmeiPakEntry pak, string installPath, bool verifyHash,
+    private static async Task<bool> IsPakCompleteAsync(PerfectWorldPakEntry pak, string installPath, bool verifyHash,
         CancellationToken token)
     {
-        foreach (WanmeiPakFile file in pak.Files)
+        foreach (PerfectWorldPakFile file in pak.Files)
         {
             token.ThrowIfCancellationRequested();
 
@@ -40,7 +40,7 @@ public partial class WanmeiGameInstaller
     ///     invoked with download deltas; <paramref name="onFilesDone"/> is invoked once per pak with the number of
     ///     files it contributed.
     /// </summary>
-    private async Task DownloadPaksAsync(IReadOnlyCollection<WanmeiPakEntry> paks, string installPath,
+    private async Task DownloadPaksAsync(IReadOnlyCollection<PerfectWorldPakEntry> paks, string installPath,
         Action<long> onBytes, Action<int> onFilesDone, CancellationToken token)
     {
         if (paks.Count == 0) return;
@@ -66,7 +66,7 @@ public partial class WanmeiGameInstaller
     ///     Downloads a single pak blob (content-addressed, resumable), verifies its MD5 and extracts every packed
     ///     file. The staged pak blob is always removed afterwards.
     /// </summary>
-    private async Task DownloadAndExtractPakAsync(WanmeiPakEntry pak, string installPath, string stagingDir,
+    private async Task DownloadAndExtractPakAsync(PerfectWorldPakEntry pak, string installPath, string stagingDir,
         CancellationToken token, Action<long> onBytes)
     {
         Directory.CreateDirectory(stagingDir);
@@ -92,7 +92,7 @@ public partial class WanmeiGameInstaller
     ///     so the blob is read mostly sequentially), MD5-verifies each one and atomically moves it into place.
     ///     Packed files that are already present and correct are skipped.
     /// </summary>
-    private static async Task ExtractPakEntriesAsync(WanmeiPakEntry pak, string pakPath, string installPath,
+    private static async Task ExtractPakEntriesAsync(PerfectWorldPakEntry pak, string pakPath, string installPath,
         CancellationToken token)
     {
         await using var pakStream = new FileStream(pakPath, FileMode.Open, FileAccess.Read, FileShare.Read,
@@ -100,7 +100,7 @@ public partial class WanmeiGameInstaller
 
         long pakLength = pakStream.Length;
 
-        foreach (WanmeiPakFile file in pak.Files.OrderBy(f => f.Offset))
+        foreach (PerfectWorldPakFile file in pak.Files.OrderBy(f => f.Offset))
         {
             token.ThrowIfCancellationRequested();
 
@@ -170,7 +170,7 @@ public partial class WanmeiGameInstaller
         catch (Exception ex)
         {
             SharedStatic.InstanceLogger.LogWarning(
-                "[WanmeiInstaller] Could not remove pak staging dir '{Path}': {Msg}", path, ex.Message);
+                "[PerfectWorldInstaller] Could not remove pak staging dir '{Path}': {Msg}", path, ex.Message);
         }
     }
 }

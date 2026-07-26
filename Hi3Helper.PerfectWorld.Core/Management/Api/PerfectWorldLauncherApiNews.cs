@@ -12,13 +12,13 @@ using Hi3Helper.Plugin.Core;
 using Hi3Helper.Plugin.Core.Management;
 using Hi3Helper.Plugin.Core.Management.Api;
 using Hi3Helper.Plugin.Core.Utility;
-using Hi3Helper.Wanmei.Core.Utils;
+using Hi3Helper.PerfectWorld.Core.Utils;
 using Microsoft.Extensions.Logging;
 
-namespace Hi3Helper.Wanmei.Core.Management.Api;
+namespace Hi3Helper.PerfectWorld.Core.Management.Api;
 
 /// <summary>
-///     News / carousel / social-media provider for Wanmei (Perfect World) launcher pages.
+///     News / carousel / social-media provider for Perfect World launcher pages.
 ///     <para>
 ///         pw_sdk titles have no JSON launcher-content API; instead the official web launcher page embeds
 ///         everything as HTML plus a small companion JS document for the banner carousel:
@@ -32,15 +32,15 @@ namespace Hi3Helper.Wanmei.Core.Management.Api;
 ///     </para>
 /// </summary>
 [GeneratedComClass]
-public partial class WanmeiLauncherApiNews : LauncherApiNewsBase
+public partial class PerfectWorldLauncherApiNews : LauncherApiNewsBase
 {
-    private readonly WanmeiNewsConfig _config;
+    private readonly PerfectWorldNewsConfig _config;
 
     private List<NewsItem>     _newsItems     = [];
     private List<CarouselItem> _carouselItems = [];
     private List<SocialItem>   _socialItems   = [];
 
-    public WanmeiLauncherApiNews(WanmeiNewsConfig config)
+    public PerfectWorldLauncherApiNews(PerfectWorldNewsConfig config)
     {
         _config = config;
     }
@@ -88,7 +88,7 @@ public partial class WanmeiLauncherApiNews : LauncherApiNewsBase
         }
         catch (Exception ex)
         {
-            SharedStatic.InstanceLogger.LogWarning("[WanmeiNews] Failed to fetch/parse news page: {Msg}", ex.Message);
+            SharedStatic.InstanceLogger.LogWarning("[PerfectWorldNews] Failed to fetch/parse news page: {Msg}", ex.Message);
         }
 
         // Carousel banners come from a companion JS document.
@@ -105,12 +105,12 @@ public partial class WanmeiLauncherApiNews : LauncherApiNewsBase
             }
             catch (Exception ex)
             {
-                SharedStatic.InstanceLogger.LogWarning("[WanmeiNews] Failed to fetch/parse banner JS: {Msg}", ex.Message);
+                SharedStatic.InstanceLogger.LogWarning("[PerfectWorldNews] Failed to fetch/parse banner JS: {Msg}", ex.Message);
             }
         }
 
         SharedStatic.InstanceLogger.LogInformation(
-            "[WanmeiNews] Parsed News={News}, Carousel={Carousel}, Social={Social}",
+            "[PerfectWorldNews] Parsed News={News}, Carousel={Carousel}, Social={Social}",
             _newsItems.Count, _carouselItems.Count, _socialItems.Count);
         return 0;
     }
@@ -172,11 +172,11 @@ public partial class WanmeiLauncherApiNews : LauncherApiNewsBase
         for (int i = 0; i < count; i++)
         {
             SocialItem item        = _socialItems[i];
-            string     displayName = WanmeiSocialMediaIcons.ResolveDisplayName(item.Key);
+            string     displayName = PerfectWorldSocialMediaIcons.ResolveDisplayName(item.Key);
 
             ref LauncherSocialMediaEntry entry = ref memory[i];
-            entry.WriteIcon(WanmeiSocialMediaIcons.Resolve(item.Key));
-            entry.WriteIconHover(WanmeiSocialMediaIcons.Resolve(item.Key));
+            entry.WriteIcon(PerfectWorldSocialMediaIcons.Resolve(item.Key));
+            entry.WriteIconHover(PerfectWorldSocialMediaIcons.Resolve(item.Key));
             entry.WriteDescription(displayName);
 
             if (!string.IsNullOrWhiteSpace(item.ClickUrl))

@@ -1,14 +1,14 @@
 using System;
 using System.Globalization;
 
-namespace Hi3Helper.Wanmei.Core;
+namespace Hi3Helper.PerfectWorld.Core;
 
 /// <summary>
-///     Immutable per-game configuration for a Perfect World (Wanmei) <c>pw_sdk</c> title. A thin plugin
+///     Immutable per-game configuration for a Perfect World <c>pw_sdk</c> title. A thin plugin
 ///     supplies one of these to describe its game; everything CDN/URL related is derived from it so the
 ///     core stays game-agnostic and reusable across pw_sdk titles.
 /// </summary>
-public sealed class WanmeiGameConfig
+public sealed class PerfectWorldGameConfig
 {
     /// <summary>Numeric application id used to derive the manifest AES key (NTE / 异环 = <c>1289</c>).</summary>
     public required string AppId { get; init; }

@@ -7,9 +7,9 @@ using System.Threading.Tasks;
 using Hi3Helper.Plugin.Core.Management;
 using Hi3Helper.Plugin.Core.Management.Api;
 using Hi3Helper.Plugin.Core.Management.PresetConfig;
-using Hi3Helper.Wanmei.Core;
-using Hi3Helper.Wanmei.Core.Management;
-using Hi3Helper.Wanmei.Core.Management.Api;
+using Hi3Helper.PerfectWorld.Core;
+using Hi3Helper.PerfectWorld.Core.Management;
+using Hi3Helper.PerfectWorld.Core.Management.Api;
 
 namespace Hi3Helper.Plugin.NTE.Management.PresetConfig;
 
@@ -31,7 +31,7 @@ public partial class NteCnPresetConfig : PluginPresetConfigBase
     // official "异环" shortcut (NTELauncher\NTELauncher.exe, working dir = install root).
     private const string LauncherBootstrapperName = @"NTELauncher\NTELauncher.exe";
 
-    private static readonly WanmeiGameConfig NteGameConfig = new()
+    private static readonly PerfectWorldGameConfig NteGameConfig = new()
     {
         AppId                            = "1289",
         GameResBranch                    = "publish_PC",
@@ -56,7 +56,7 @@ public partial class NteCnPresetConfig : PluginPresetConfigBase
         LauncherStartupRevealTimeoutSeconds = 120
     };
 
-    private static readonly WanmeiNewsConfig NteNewsConfig = new()
+    private static readonly PerfectWorldNewsConfig NteNewsConfig = new()
     {
         NewsPageUrl     = "https://yh.wanmei.com/launcher/launcher_ob.html?expand=1",
         NewsLinkBaseUrl = "https://yh.wanmei.com",
@@ -111,25 +111,25 @@ public partial class NteCnPresetConfig : PluginPresetConfigBase
 
     public override ILauncherApiMedia? LauncherApiMedia
     {
-        get => field ??= new WanmeiLauncherApiMedia(NteGameConfig);
+        get => field ??= new PerfectWorldLauncherApiMedia(NteGameConfig);
         set;
     }
 
     public override ILauncherApiNews? LauncherApiNews
     {
-        get => field ??= new WanmeiLauncherApiNews(NteNewsConfig);
+        get => field ??= new PerfectWorldLauncherApiNews(NteNewsConfig);
         set;
     }
 
     public override IGameManager? GameManager
     {
-        get => field ??= new WanmeiGameManager(NteGameConfig);
+        get => field ??= new PerfectWorldGameManager(NteGameConfig);
         set;
     }
 
     public override IGameInstaller? GameInstaller
     {
-        get => field ??= new WanmeiGameInstaller(GameManager!);
+        get => field ??= new PerfectWorldGameInstaller(GameManager!);
         set;
     }
 

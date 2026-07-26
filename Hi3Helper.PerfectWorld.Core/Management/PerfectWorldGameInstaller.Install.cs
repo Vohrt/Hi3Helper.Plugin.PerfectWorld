@@ -8,24 +8,24 @@ using System.Threading;
 using System.Threading.Tasks;
 using Hi3Helper.Plugin.Core;
 using Hi3Helper.Plugin.Core.Management;
-using Hi3Helper.Wanmei.Core.Management.Api;
-using Hi3Helper.Wanmei.Core.Utils;
+using Hi3Helper.PerfectWorld.Core.Management.Api;
+using Hi3Helper.PerfectWorld.Core.Utils;
 using Microsoft.Extensions.Logging;
 
-namespace Hi3Helper.Wanmei.Core.Management;
+namespace Hi3Helper.PerfectWorld.Core.Management;
 
-public partial class WanmeiGameInstaller
+public partial class PerfectWorldGameInstaller
 {
     private const int ProgressThrottleMs = 500;
 
     /// <summary>Sub-directory (under the install root) used to stage downloaded pak blobs before extraction.</summary>
-    private const string PakStagingDirName = ".wanmei_pak_cache";
+    private const string PakStagingDirName = ".perfectworld_pak_cache";
 
     /// <summary>Concurrency for pak downloads; kept lower than file downloads because pak blobs are large.</summary>
     private const int PakDownloadParallelism = 2;
 
     /// <summary>Decrypted manifest split into directly content-addressed files and packed pak archives.</summary>
-    internal sealed record ManifestBundle(List<WanmeiResEntry> Files, List<WanmeiPakEntry> Paks);
+    internal sealed record ManifestBundle(List<PerfectWorldResEntry> Files, List<PerfectWorldPakEntry> Paks);
 
     private ManifestBundle? _cachedManifest;
     private string? _cachedManifestVersion;
@@ -41,27 +41,27 @@ public partial class WanmeiGameInstaller
     /// </summary>
     private async Task<ManifestBundle> GetManifestBundleAsync(CancellationToken token, bool forceRefresh = false)
     {
-        WanmeiRemoteConfig? remote = await Manager.GetRemoteConfigAsync(forceRefresh, token).ConfigureAwait(false);
+        PerfectWorldRemoteConfig? remote = await Manager.GetRemoteConfigAsync(forceRefresh, token).ConfigureAwait(false);
         if (remote == null || string.IsNullOrEmpty(remote.ResVersion))
             throw new IOException("Unable to obtain remote config.xml for manifest.");
 
         if (!forceRefresh && _cachedManifest != null && _cachedManifestVersion == remote.ResVersion)
             return _cachedManifest;
 
-        WanmeiGameConfig config = Manager.Config;
+        PerfectWorldGameConfig config = Manager.Config;
         byte[] zipBytes = await DownloadBytesWithFallbackAsync(
             cdn => config.BuildResListZipUrl(cdn, remote.ResVersion), token).ConfigureAwait(false);
 
         byte[] resListBin = ExtractZipEntry(zipBytes, "ResList.bin");
         string xml = PatcherXml0.DecodeToXml(resListBin, config.AppId);
-        List<WanmeiResEntry> files = WanmeiManifest.ParseResList(xml);
-        List<WanmeiPakEntry> paks = WanmeiManifest.ParsePackages(xml);
+        List<PerfectWorldResEntry> files = PerfectWorldManifest.ParseResList(xml);
+        List<PerfectWorldPakEntry> paks = PerfectWorldManifest.ParsePackages(xml);
 
         long packedCount = 0;
-        foreach (WanmeiPakEntry pak in paks) packedCount += pak.Files.Count;
+        foreach (PerfectWorldPakEntry pak in paks) packedCount += pak.Files.Count;
 
         SharedStatic.InstanceLogger.LogInformation(
-            "[WanmeiInstaller] Manifest {Version}: {Res} direct files + {Paks} paks ({Packed} packed files) = {Total} total.",
+            "[PerfectWorldInstaller] Manifest {Version}: {Res} direct files + {Paks} paks ({Packed} packed files) = {Total} total.",
             remote.ResVersion, files.Count, paks.Count, packedCount, files.Count + packedCount);
 
         var bundle = new ManifestBundle(files, paks);
@@ -83,21 +83,21 @@ public partial class WanmeiGameInstaller
         // --- Preparing: obtain remote config + manifest -------------------------------------------------
         progressStateDelegate?.Invoke(InstallProgressState.Preparing);
 
-        WanmeiRemoteConfig? remote = await Manager.GetRemoteConfigAsync(true, token).ConfigureAwait(false);
+        PerfectWorldRemoteConfig? remote = await Manager.GetRemoteConfigAsync(true, token).ConfigureAwait(false);
         if (remote == null || string.IsNullOrEmpty(remote.ResVersion))
             throw new IOException("Unable to obtain remote config.xml.");
 
         ManifestBundle bundle = await GetManifestBundleAsync(token, forceRefresh: true).ConfigureAwait(false);
-        List<WanmeiResEntry> manifest = bundle.Files;
-        List<WanmeiPakEntry> paks = bundle.Paks;
+        List<PerfectWorldResEntry> manifest = bundle.Files;
+        List<PerfectWorldPakEntry> paks = bundle.Paks;
         if (manifest.Count == 0 && paks.Count == 0)
             throw new IOException("Manifest contained no file entries.");
 
         // --- Verify: decide which files/paks need downloading -------------------------------------------
         progressStateDelegate?.Invoke(InstallProgressState.Verify);
 
-        var toDownload = new ConcurrentBag<WanmeiResEntry>();
-        var paksToDownload = new ConcurrentBag<WanmeiPakEntry>();
+        var toDownload = new ConcurrentBag<PerfectWorldResEntry>();
+        var paksToDownload = new ConcurrentBag<PerfectWorldPakEntry>();
         long existingBytes = 0;
         int existingCount = 0;
 
@@ -239,7 +239,7 @@ public partial class WanmeiGameInstaller
         progressStateDelegate?.Invoke(InstallProgressState.Completed);
 
         SharedStatic.InstanceLogger.LogInformation(
-            "[WanmeiInstaller] Reconciliation to {Version} complete ({Res} files + {Paks} paks + launcher {Launcher} files).",
+            "[PerfectWorldInstaller] Reconciliation to {Version} complete ({Res} files + {Paks} paks + launcher {Launcher} files).",
             remote.ResVersion, manifest.Count, paks.Count, launcherPlan.TotalCount);
     }
 
@@ -286,7 +286,7 @@ public partial class WanmeiGameInstaller
             {
                 lastError = ex;
                 SharedStatic.InstanceLogger.LogWarning(
-                    "[WanmeiInstaller] Failed to download {Url}: {Msg}", url, ex.Message);
+                    "[PerfectWorldInstaller] Failed to download {Url}: {Msg}", url, ex.Message);
             }
         }
 

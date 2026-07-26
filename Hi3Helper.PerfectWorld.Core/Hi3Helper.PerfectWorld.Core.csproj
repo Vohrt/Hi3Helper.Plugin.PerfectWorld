@@ -10,17 +10,17 @@
         <DebugType>embedded</DebugType>
         <Deterministic>true</Deterministic>
         <LangVersion>preview</LangVersion>
-        <AssemblyName>Wanmei.Core</AssemblyName>
-        <ProductName>Wanmei (Perfect World) Core Plugin Library</ProductName>
+        <AssemblyName>PerfectWorld.Core</AssemblyName>
+        <ProductName>Perfect World Core Plugin Library</ProductName>
         <Product>Collapse</Product>
-        <Description>Common core functionality (Perfect World pw_sdk / PatcherSDK update mechanism) for Wanmei-published game plugins in Collapse Launcher</Description>
-        <AssemblyTitle>Wanmei Core Library</AssemblyTitle>
+        <Description>Common core functionality (Perfect World pw_sdk / PatcherSDK update mechanism) for Perfect World-published game plugins in Collapse Launcher</Description>
+        <AssemblyTitle>Perfect World Core Library</AssemblyTitle>
         <Company>CollapsePlugin</Company>
         <Authors>$(Company).</Authors>
         <Copyright>Copyright 2026 $(Company)</Copyright>
         <Version>1.0.0</Version>
         <Configurations>Debug;Release;DebugNoReflection;ReleaseNoReflection</Configurations>
-        <Title>Hi3Helper.Wanmei.Core</Title>
+        <Title>Hi3Helper.PerfectWorld.Core</Title>
     </PropertyGroup>
 
     <PropertyGroup Condition="'$(Configuration)'=='DebugNoReflection'">

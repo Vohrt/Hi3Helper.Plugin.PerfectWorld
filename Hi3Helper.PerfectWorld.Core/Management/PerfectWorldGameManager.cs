@@ -8,31 +8,37 @@ using System.Threading.Tasks;
 using Hi3Helper.Plugin.Core;
 using Hi3Helper.Plugin.Core.Management;
 using Hi3Helper.Plugin.Core.Utility;
-using Hi3Helper.Wanmei.Core.Management.Api;
+using Hi3Helper.PerfectWorld.Core.Management.Api;
 using Microsoft.Extensions.Logging;
 
-namespace Hi3Helper.Wanmei.Core.Management;
+namespace Hi3Helper.PerfectWorld.Core.Management;
 
 /// <summary>
-///     <see cref="IGameManager"/> implementation for Perfect World (Wanmei) pw_sdk titles. Handles version
+///     <see cref="IGameManager"/> implementation for Perfect World pw_sdk titles. Handles version
 ///     detection (local install vs remote <c>config.xml</c>) and install-state discovery.
 /// </summary>
 [GeneratedComClass]
-public partial class WanmeiGameManager : GameManagerBase
+public partial class PerfectWorldGameManager : GameManagerBase
 {
     /// <summary>Plugin-owned marker that records the installed resource version.</summary>
-    internal const string StateFileName = "collapse_wanmei_state.ini";
+    internal const string StateFileName = "collapse_perfectworld_state.ini";
 
-    private readonly WanmeiGameConfig _config;
-    private WanmeiRemoteConfig? _remoteConfig;
+    /// <summary>
+    ///     Legacy marker name used before the Wanmei → PerfectWorld rename. Still read (and cleaned up on the
+    ///     next write) so installations created by earlier plugin builds keep their recorded version.
+    /// </summary>
+    internal const string LegacyStateFileName = "collapse_wanmei_state.ini";
+
+    private readonly PerfectWorldGameConfig _config;
+    private PerfectWorldRemoteConfig? _remoteConfig;
     private bool _isInitialized;
 
-    public WanmeiGameManager(WanmeiGameConfig config)
+    public PerfectWorldGameManager(PerfectWorldGameConfig config)
     {
         _config = config;
     }
 
-    public WanmeiGameConfig Config => _config;
+    public PerfectWorldGameConfig Config => _config;
 
     protected override HttpClient ApiResponseHttpClient { get; set; } = new PluginHttpClientBuilder()
         .SetAllowedDecompression(DecompressionMethods.All)
@@ -75,7 +81,7 @@ public partial class WanmeiGameManager : GameManagerBase
     /// <summary>
     ///     Returns the cached remote config, fetching it once if required.
     /// </summary>
-    internal async Task<WanmeiRemoteConfig?> GetRemoteConfigAsync(bool forceRefresh, CancellationToken token)
+    internal async Task<PerfectWorldRemoteConfig?> GetRemoteConfigAsync(bool forceRefresh, CancellationToken token)
     {
         if (!forceRefresh && _remoteConfig != null) return _remoteConfig;
 
@@ -85,15 +91,15 @@ public partial class WanmeiGameManager : GameManagerBase
             try
             {
                 string xml = await ApiResponseHttpClient.GetStringAsync(url, token).ConfigureAwait(false);
-                _remoteConfig = WanmeiRemoteConfig.Parse(xml);
+                _remoteConfig = PerfectWorldRemoteConfig.Parse(xml);
                 SharedStatic.InstanceLogger.LogInformation(
-                    "[WanmeiManager] Remote config: ResVersion={Version}, ResSize={Size}",
+                    "[PerfectWorldManager] Remote config: ResVersion={Version}, ResSize={Size}",
                     _remoteConfig.ResVersion, _remoteConfig.ResSize);
                 return _remoteConfig;
             }
             catch (Exception ex)
             {
-                SharedStatic.InstanceLogger.LogWarning("[WanmeiManager] Failed to fetch config.xml from {Url}: {Msg}",
+                SharedStatic.InstanceLogger.LogWarning("[PerfectWorldManager] Failed to fetch config.xml from {Url}: {Msg}",
                     url, ex.Message);
             }
         }
@@ -110,7 +116,7 @@ public partial class WanmeiGameManager : GameManagerBase
         CurrentGameVersion = string.IsNullOrEmpty(localVersion) ? GameVersion.Empty : new GameVersion(localVersion);
 
         // Remote available version.
-        WanmeiRemoteConfig? remote = await GetRemoteConfigAsync(true, token).ConfigureAwait(false);
+        PerfectWorldRemoteConfig? remote = await GetRemoteConfigAsync(true, token).ConfigureAwait(false);
         if (remote != null && !string.IsNullOrEmpty(remote.ResVersion))
             ApiGameVersion = new GameVersion(remote.ResVersion);
 
@@ -128,19 +134,10 @@ public partial class WanmeiGameManager : GameManagerBase
     {
         if (string.IsNullOrEmpty(CurrentGameInstallPath)) return null;
 
-        string stateFile = Path.Combine(CurrentGameInstallPath, StateFileName);
-        if (File.Exists(stateFile))
-        {
-            foreach (string line in File.ReadAllLines(stateFile))
-            {
-                string trimmed = line.Trim();
-                if (trimmed.StartsWith("ResVersion=", StringComparison.OrdinalIgnoreCase))
-                {
-                    string value = trimmed["ResVersion=".Length..].Trim();
-                    if (!string.IsNullOrEmpty(value)) return value;
-                }
-            }
-        }
+        // Prefer the current marker; fall back to the pre-rename marker so existing installs stay recognised.
+        string? recorded = TryReadResVersionFromStateFile(Path.Combine(CurrentGameInstallPath, StateFileName))
+                           ?? TryReadResVersionFromStateFile(Path.Combine(CurrentGameInstallPath, LegacyStateFileName));
+        if (!string.IsNullOrEmpty(recorded)) return recorded;
 
         // Fallback: the official launcher stores a plaintext config.xml with <ResVersion>.
         string officialConfig = Path.Combine(CurrentGameInstallPath,
@@ -149,13 +146,34 @@ public partial class WanmeiGameManager : GameManagerBase
         {
             try
             {
-                var parsed = WanmeiRemoteConfig.Parse(File.ReadAllText(officialConfig));
+                var parsed = PerfectWorldRemoteConfig.Parse(File.ReadAllText(officialConfig));
                 if (!string.IsNullOrEmpty(parsed.ResVersion)) return parsed.ResVersion;
             }
             catch (Exception ex)
             {
-                SharedStatic.InstanceLogger.LogWarning("[WanmeiManager] Could not read official config.xml: {Msg}",
+                SharedStatic.InstanceLogger.LogWarning("[PerfectWorldManager] Could not read official config.xml: {Msg}",
                     ex.Message);
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    ///     Reads the <c>ResVersion</c> value from a plugin-owned state file, or <c>null</c> if the file is
+    ///     missing or does not contain the marker.
+    /// </summary>
+    private static string? TryReadResVersionFromStateFile(string stateFile)
+    {
+        if (!File.Exists(stateFile)) return null;
+
+        foreach (string line in File.ReadAllLines(stateFile))
+        {
+            string trimmed = line.Trim();
+            if (trimmed.StartsWith("ResVersion=", StringComparison.OrdinalIgnoreCase))
+            {
+                string value = trimmed["ResVersion=".Length..].Trim();
+                if (!string.IsNullOrEmpty(value)) return value;
             }
         }
 
@@ -174,11 +192,19 @@ public partial class WanmeiGameManager : GameManagerBase
             Directory.CreateDirectory(CurrentGameInstallPath);
             string stateFile = Path.Combine(CurrentGameInstallPath, StateFileName);
             File.WriteAllText(stateFile, $"ResVersion={resVersion}{Environment.NewLine}");
+
+            // Migration cleanup: drop the pre-rename marker once the new one is written.
+            string legacyStateFile = Path.Combine(CurrentGameInstallPath, LegacyStateFileName);
+            if (File.Exists(legacyStateFile))
+            {
+                try { File.Delete(legacyStateFile); } catch { /* best effort */ }
+            }
+
             CurrentGameVersion = new GameVersion(resVersion);
         }
         catch (Exception ex)
         {
-            SharedStatic.InstanceLogger.LogWarning("[WanmeiManager] Failed to write state file: {Msg}", ex.Message);
+            SharedStatic.InstanceLogger.LogWarning("[PerfectWorldManager] Failed to write state file: {Msg}", ex.Message);
         }
     }
 
@@ -197,7 +223,7 @@ public partial class WanmeiGameManager : GameManagerBase
             }
             catch (Exception ex)
             {
-                SharedStatic.InstanceLogger.LogError("[WanmeiManager] Re-initialization failed: {Msg}", ex.Message);
+                SharedStatic.InstanceLogger.LogError("[PerfectWorldManager] Re-initialization failed: {Msg}", ex.Message);
             }
         });
     }

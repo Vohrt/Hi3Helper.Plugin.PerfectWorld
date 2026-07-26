@@ -4,10 +4,10 @@ using System.IO.Compression;
 using System.Security.Cryptography;
 using System.Text;
 
-namespace Hi3Helper.Wanmei.Core.Utils;
+namespace Hi3Helper.PerfectWorld.Core.Utils;
 
 /// <summary>
-///     Decoder for Perfect World (Wanmei) <c>pw_sdk</c> / <c>PatcherSDK</c> "PatcherXML0" encrypted manifests
+///     Decoder for Perfect World <c>pw_sdk</c> / <c>PatcherSDK</c> "PatcherXML0" encrypted manifests
 ///     (e.g. <c>ResList.bin</c>, <c>lastdiff.bin</c>, <c>client.xml</c>).
 /// </summary>
 /// <remarks>

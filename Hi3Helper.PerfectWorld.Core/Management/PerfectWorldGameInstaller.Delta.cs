@@ -7,16 +7,16 @@ using System.Threading;
 using System.Threading.Tasks;
 using Hi3Helper.Plugin.Core;
 using Hi3Helper.Plugin.Core.Management;
-using Hi3Helper.Wanmei.Core.Management.Api;
-using Hi3Helper.Wanmei.Core.Utils;
+using Hi3Helper.PerfectWorld.Core.Management.Api;
+using Hi3Helper.PerfectWorld.Core.Utils;
 using Microsoft.Extensions.Logging;
 using SharpHDiffPatch.Core;
 
-namespace Hi3Helper.Wanmei.Core.Management;
+namespace Hi3Helper.PerfectWorld.Core.Management;
 
-public partial class WanmeiGameInstaller
+public partial class PerfectWorldGameInstaller
 {
-    private List<WanmeiPatchEntry>? _cachedPatches;
+    private List<PerfectWorldPatchEntry>? _cachedPatches;
     private string? _cachedPatchesVersion;
 
     // The managed HDiffPatch applier keeps some process-wide static state and each apply can allocate large
@@ -24,19 +24,19 @@ public partial class WanmeiGameInstaller
     private readonly SemaphoreSlim _patchApplyLock = new(1, 1);
 
     /// <summary>
-    ///     A per-file update action: either apply a binary <see cref="WanmeiPatchEntry"/> delta on top of the local
+    ///     A per-file update action: either apply a binary <see cref="PerfectWorldPatchEntry"/> delta on top of the local
     ///     file, or fully (re)download the content-addressed target.
     /// </summary>
     private readonly struct UpdatePlan
     {
-        public required WanmeiResEntry Entry { get; init; }
-        public WanmeiPatchEntry? Patch { get; init; }
+        public required PerfectWorldResEntry Entry { get; init; }
+        public PerfectWorldPatchEntry? Patch { get; init; }
         public bool IsDelta => Patch != null;
 
-        public static UpdatePlan Delta(WanmeiResEntry entry, WanmeiPatchEntry patch) =>
+        public static UpdatePlan Delta(PerfectWorldResEntry entry, PerfectWorldPatchEntry patch) =>
             new() { Entry = entry, Patch = patch };
 
-        public static UpdatePlan Full(WanmeiResEntry entry) =>
+        public static UpdatePlan Full(PerfectWorldResEntry entry) =>
             new() { Entry = entry };
     }
 
@@ -44,22 +44,22 @@ public partial class WanmeiGameInstaller
     ///     Fetches and decodes the incremental <c>lastdiff</c> manifest for the current remote resource version
     ///     (cached). The blob is served raw (PatcherXML0) but a zip-wrapped variant is tolerated too.
     /// </summary>
-    private async Task<List<WanmeiPatchEntry>> GetPatchManifestAsync(WanmeiRemoteConfig remote,
+    private async Task<List<PerfectWorldPatchEntry>> GetPatchManifestAsync(PerfectWorldRemoteConfig remote,
         CancellationToken token)
     {
         if (_cachedPatches != null && _cachedPatchesVersion == remote.ResVersion)
             return _cachedPatches;
 
-        WanmeiGameConfig config = Manager.Config;
+        PerfectWorldGameConfig config = Manager.Config;
         byte[] raw = await DownloadBytesWithFallbackAsync(
             cdn => config.BuildLastDiffUrl(cdn, remote.ResVersion), token).ConfigureAwait(false);
 
         byte[] bin = LooksLikeZip(raw) ? ExtractZipEntry(raw, "lastdiff.bin") : raw;
         string xml = PatcherXml0.DecodeToXml(bin, config.AppId);
-        List<WanmeiPatchEntry> entries = WanmeiManifest.ParsePatchList(xml);
+        List<PerfectWorldPatchEntry> entries = PerfectWorldManifest.ParsePatchList(xml);
 
         SharedStatic.InstanceLogger.LogInformation(
-            "[WanmeiInstaller] lastdiff {Version}: {Count} patch entries.", remote.ResVersion, entries.Count);
+            "[PerfectWorldInstaller] lastdiff {Version}: {Count} patch entries.", remote.ResVersion, entries.Count);
 
         _cachedPatches = entries;
         _cachedPatchesVersion = remote.ResVersion;
@@ -79,14 +79,14 @@ public partial class WanmeiGameInstaller
     {
         try
         {
-            WanmeiRemoteConfig? remote = await Manager.GetRemoteConfigAsync(false, token).ConfigureAwait(false);
+            PerfectWorldRemoteConfig? remote = await Manager.GetRemoteConfigAsync(false, token).ConfigureAwait(false);
             if (remote == null || string.IsNullOrEmpty(remote.ResVersion))
                 return null;
 
-            List<WanmeiPatchEntry> patches = await GetPatchManifestAsync(remote, token).ConfigureAwait(false);
+            List<PerfectWorldPatchEntry> patches = await GetPatchManifestAsync(remote, token).ConfigureAwait(false);
 
             var index = new Dictionary<string, Dictionary<long, long>>(StringComparer.OrdinalIgnoreCase);
-            foreach (WanmeiPatchEntry p in patches)
+            foreach (PerfectWorldPatchEntry p in patches)
             {
                 if (!index.TryGetValue(p.NewMd5, out Dictionary<long, long>? byOldSize))
                     index[p.NewMd5] = byOldSize = new Dictionary<long, long>();
@@ -100,7 +100,7 @@ public partial class WanmeiGameInstaller
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             SharedStatic.InstanceLogger.LogWarning(
-                "[WanmeiInstaller] Patch index for size estimate unavailable ({Msg}); reporting full transfer sizes.",
+                "[PerfectWorldInstaller] Patch index for size estimate unavailable ({Msg}); reporting full transfer sizes.",
                 ex.Message);
             return null;
         }
@@ -120,17 +120,17 @@ public partial class WanmeiGameInstaller
         // --- Preparing: remote config + target manifest + patch manifest --------------------------------
         progressStateDelegate?.Invoke(InstallProgressState.Preparing);
 
-        WanmeiRemoteConfig? remote = await Manager.GetRemoteConfigAsync(true, token).ConfigureAwait(false);
+        PerfectWorldRemoteConfig? remote = await Manager.GetRemoteConfigAsync(true, token).ConfigureAwait(false);
         if (remote == null || string.IsNullOrEmpty(remote.ResVersion))
             throw new IOException("Unable to obtain remote config.xml.");
 
         ManifestBundle bundle = await GetManifestBundleAsync(token, forceRefresh: true).ConfigureAwait(false);
-        List<WanmeiResEntry> manifest = bundle.Files;
-        List<WanmeiPakEntry> paks = bundle.Paks;
+        List<PerfectWorldResEntry> manifest = bundle.Files;
+        List<PerfectWorldPakEntry> paks = bundle.Paks;
         if (manifest.Count == 0 && paks.Count == 0)
             throw new IOException("Manifest contained no file entries.");
 
-        List<WanmeiPatchEntry> patches;
+        List<PerfectWorldPatchEntry> patches;
         try
         {
             patches = await GetPatchManifestAsync(remote, token).ConfigureAwait(false);
@@ -138,18 +138,18 @@ public partial class WanmeiGameInstaller
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             SharedStatic.InstanceLogger.LogWarning(
-                "[WanmeiInstaller] lastdiff unavailable ({Msg}); using full-file reconcile.", ex.Message);
+                "[PerfectWorldInstaller] lastdiff unavailable ({Msg}); using full-file reconcile.", ex.Message);
             await ReconcileToManifestAsync(progressDelegate, progressStateDelegate, verifyHash: true, token)
                 .ConfigureAwait(false);
             return;
         }
 
         // Index candidate patches by target content id, then by source content id.
-        var patchByNew = new Dictionary<string, Dictionary<string, WanmeiPatchEntry>>(StringComparer.OrdinalIgnoreCase);
-        foreach (WanmeiPatchEntry p in patches)
+        var patchByNew = new Dictionary<string, Dictionary<string, PerfectWorldPatchEntry>>(StringComparer.OrdinalIgnoreCase);
+        foreach (PerfectWorldPatchEntry p in patches)
         {
-            if (!patchByNew.TryGetValue(p.NewMd5, out Dictionary<string, WanmeiPatchEntry>? byOld))
-                patchByNew[p.NewMd5] = byOld = new Dictionary<string, WanmeiPatchEntry>(StringComparer.OrdinalIgnoreCase);
+            if (!patchByNew.TryGetValue(p.NewMd5, out Dictionary<string, PerfectWorldPatchEntry>? byOld))
+                patchByNew[p.NewMd5] = byOld = new Dictionary<string, PerfectWorldPatchEntry>(StringComparer.OrdinalIgnoreCase);
             byOld[p.OldMd5] = p;
         }
 
@@ -172,11 +172,11 @@ public partial class WanmeiGameInstaller
                 }
 
                 if (exists &&
-                    patchByNew.TryGetValue(entry.Md5, out Dictionary<string, WanmeiPatchEntry>? byOld) &&
+                    patchByNew.TryGetValue(entry.Md5, out Dictionary<string, PerfectWorldPatchEntry>? byOld) &&
                     byOld.Count > 0)
                 {
                     string localMd5 = await ComputeMd5Async(localPath, ct).ConfigureAwait(false);
-                    if (byOld.TryGetValue(localMd5, out WanmeiPatchEntry? patch) &&
+                    if (byOld.TryGetValue(localMd5, out PerfectWorldPatchEntry? patch) &&
                         patch.NewSize == entry.FileSize &&
                         patch.PatchSize < entry.FileSize) // only worthwhile if the patch is smaller than a full fetch
                     {
@@ -194,7 +194,7 @@ public partial class WanmeiGameInstaller
 
         // Classify packed (pak) archives. Their entries are not individually content-addressable, so a pak whose
         // files aren't all present+correct is simply re-downloaded whole and re-extracted (no per-entry delta).
-        var paksToDownload = new ConcurrentBag<WanmeiPakEntry>();
+        var paksToDownload = new ConcurrentBag<PerfectWorldPakEntry>();
         await Parallel.ForEachAsync(paks,
             new ParallelOptions { MaxDegreeOfParallelism = VerifyParallelism, CancellationToken = token },
             async (pak, ct) =>
@@ -218,7 +218,7 @@ public partial class WanmeiGameInstaller
 
         int deltaCount = planList.Count(p => p.IsDelta);
         SharedStatic.InstanceLogger.LogInformation(
-            "[WanmeiInstaller] Update {Version}: {UpToDate} up-to-date, {Delta} delta, {Full} full, {Paks} paks ({Bytes} bytes).",
+            "[PerfectWorldInstaller] Update {Version}: {UpToDate} up-to-date, {Delta} delta, {Full} full, {Paks} paks ({Bytes} bytes).",
             remote.ResVersion, upToDate, deltaCount, planList.Count - deltaCount, paksToDownload.Count, totalTransfer);
 
         // --- Update: download patches/files and apply ---------------------------------------------------
@@ -270,7 +270,7 @@ public partial class WanmeiGameInstaller
                     catch (Exception ex) when (ex is not OperationCanceledException)
                     {
                         SharedStatic.InstanceLogger.LogWarning(
-                            "[WanmeiInstaller] Delta failed for {File} ({Msg}); falling back to full download.",
+                            "[PerfectWorldInstaller] Delta failed for {File} ({Msg}); falling back to full download.",
                             plan.Entry.Filename, ex.Message);
                         // The full download transfers the whole file instead of just the patch, so widen the total.
                         AddToTotal(plan.Entry.FileSize - plan.Patch!.PatchSize);
@@ -319,7 +319,7 @@ public partial class WanmeiGameInstaller
         progressStateDelegate?.Invoke(InstallProgressState.Completed);
 
         SharedStatic.InstanceLogger.LogInformation(
-            "[WanmeiInstaller] Incremental update to {Version} complete ({Count} files, {Delta} via delta, {Paks} paks, launcher {Launcher} files).",
+            "[PerfectWorldInstaller] Incremental update to {Version} complete ({Count} files, {Delta} via delta, {Paks} paks, launcher {Launcher} files).",
             remote.ResVersion, totalCount, deltaCount, paksToDownload.Count, launcherPlan.TotalCount);
     }
 
@@ -328,7 +328,7 @@ public partial class WanmeiGameInstaller
     ///     file and atomically replaces it. Throws on any verification failure so the caller can fall back to a full
     ///     download; the local file is left untouched until the patched result is fully verified.
     /// </summary>
-    private async Task ApplyDeltaAsync(WanmeiResEntry entry, WanmeiPatchEntry patch, string localPath,
+    private async Task ApplyDeltaAsync(PerfectWorldResEntry entry, PerfectWorldPatchEntry patch, string localPath,
         CancellationToken token, Action<long> onProgress)
     {
         string patchPath = localPath + ".hpatch";
@@ -377,7 +377,7 @@ public partial class WanmeiGameInstaller
     /// <summary>
     ///     Fully downloads a content-addressed target file into place and verifies its MD5.
     /// </summary>
-    private async Task DownloadFullAsync(WanmeiResEntry entry, string localPath, CancellationToken token,
+    private async Task DownloadFullAsync(PerfectWorldResEntry entry, string localPath, CancellationToken token,
         Action<long> onProgress)
     {
         string tempPath = localPath + ".tmp";

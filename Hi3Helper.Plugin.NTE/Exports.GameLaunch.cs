@@ -11,8 +11,8 @@ using System.Threading;
 using System.Threading.Tasks;
 using Hi3Helper.Plugin.Core.Management.PresetConfig;
 using Hi3Helper.Plugin.Core.Utility;
-using Hi3Helper.Wanmei.Core;
-using Hi3Helper.Wanmei.Core.Management;
+using Hi3Helper.PerfectWorld.Core;
+using Hi3Helper.PerfectWorld.Core.Management;
 using Microsoft.Extensions.Logging;
 
 namespace Hi3Helper.Plugin.NTE;
@@ -235,7 +235,7 @@ public partial class Exports
         gameExecutablePath = null;
         if (context is not
             {
-                GameManager: WanmeiGameManager nteManager, PresetConfig: PluginPresetConfigBase presetConfig
+                GameManager: PerfectWorldGameManager nteManager, PresetConfig: PluginPresetConfigBase presetConfig
             }) return false;
 
         nteManager.GetGamePath(out var gamePath);
@@ -258,7 +258,7 @@ public partial class Exports
 
         // Existence of the real game binary gates launch; it is also what we track for run/kill detection.
         if (!TryGetGameExecutablePath(context, out var gameExecutablePath)) return false;
-        if (context.GameManager is not WanmeiGameManager nteManager) return false;
+        if (context.GameManager is not PerfectWorldGameManager nteManager) return false;
 
         nteManager.GetGamePath(out var gamePath);
         if (string.IsNullOrEmpty(gamePath)) return false;
@@ -373,7 +373,7 @@ public partial class Exports
     /// Everything needed to silence the vendor launcher for a single launch: where the launcher lives, which game
     /// binary to track, which settings file to patch and the per-game silent-launch configuration.
     /// </summary>
-    private sealed record SilentLaunchPlan(string LauncherDir, string GameExePath, string SettingsIniPath, WanmeiGameConfig Config);
+    private sealed record SilentLaunchPlan(string LauncherDir, string GameExePath, string SettingsIniPath, PerfectWorldGameConfig Config);
 
     /// <summary>
     /// Drives a silent launch through the vendor launcher. The launcher's own settings (already patched before start)
@@ -704,7 +704,7 @@ public partial class Exports
         launcherDir = string.Empty;
         baseNames = [];
 
-        if (context.GameManager is not WanmeiGameManager nteManager) return false;
+        if (context.GameManager is not PerfectWorldGameManager nteManager) return false;
 
         var config = nteManager.Config;
         if (!config.SilentLaunch || string.IsNullOrEmpty(config.LauncherBootstrapperRelativePath)) return false;

@@ -7,12 +7,12 @@ using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using Hi3Helper.Plugin.Core;
-using Hi3Helper.Wanmei.Core.Management.Api;
+using Hi3Helper.PerfectWorld.Core.Management.Api;
 using Microsoft.Extensions.Logging;
 
-namespace Hi3Helper.Wanmei.Core.Management;
+namespace Hi3Helper.PerfectWorld.Core.Management;
 
-public partial class WanmeiGameInstaller
+public partial class PerfectWorldGameInstaller
 {
     /// <summary>Install-relative directory that holds the vendor launcher (self-update target of AllFiles.xml).</summary>
     private const string LauncherRootDirName = "NTELauncher";
@@ -23,8 +23,8 @@ public partial class WanmeiGameInstaller
     ///     on the CDN).
     /// </summary>
     internal sealed record LauncherPlan(
-        WanmeiLauncherManifest Manifest,
-        List<WanmeiLauncherFile> ToDownload,
+        PerfectWorldLauncherManifest Manifest,
+        List<PerfectWorldLauncherFile> ToDownload,
         long TotalZipBytes,
         int TotalCount,
         long ExistingZipBytes,
@@ -37,20 +37,20 @@ public partial class WanmeiGameInstaller
     ///     Fetches and parses the vendor launcher self-update manifest (<c>Version.ini</c> → <c>AllFiles.xml</c>),
     ///     trying every configured launcher CDN root.
     /// </summary>
-    private async Task<WanmeiLauncherManifest> GetLauncherManifestAsync(CancellationToken token)
+    private async Task<PerfectWorldLauncherManifest> GetLauncherManifestAsync(CancellationToken token)
     {
-        WanmeiGameConfig config = Manager.Config;
+        PerfectWorldGameConfig config = Manager.Config;
 
         byte[] versionIniBytes = await DownloadBytesWithFallbackAsync(
             config.LauncherCdnUrls, config.BuildLauncherVersionIniUrl, token).ConfigureAwait(false);
         string versionIni = Encoding.UTF8.GetString(versionIniBytes);
 
         (string? fileListUrl, string? version, string? build) =
-            WanmeiLauncherManifestParser.ParseVersionIni(versionIni);
+            PerfectWorldLauncherManifestParser.ParseVersionIni(versionIni);
         if (string.IsNullOrEmpty(fileListUrl))
             throw new IOException("Launcher Version.ini did not contain a FileListURL.");
 
-        string? versionDir = WanmeiLauncherManifestParser.ExtractVersionDir(fileListUrl);
+        string? versionDir = PerfectWorldLauncherManifestParser.ExtractVersionDir(fileListUrl);
         if (string.IsNullOrEmpty(versionDir))
             throw new IOException($"Could not derive launcher version directory from '{fileListUrl}'.");
 
@@ -59,12 +59,12 @@ public partial class WanmeiGameInstaller
             .ConfigureAwait(false);
         string allFilesXml = Encoding.UTF8.GetString(allFilesBytes);
 
-        WanmeiLauncherManifest manifest = WanmeiLauncherManifestParser.ParseAllFiles(allFilesXml, versionDir);
+        PerfectWorldLauncherManifest manifest = PerfectWorldLauncherManifestParser.ParseAllFiles(allFilesXml, versionDir);
         if (manifest.Files.Count == 0)
             throw new IOException("Launcher AllFiles.xml contained no file entries.");
 
         SharedStatic.InstanceLogger.LogInformation(
-            "[WanmeiInstaller] Launcher manifest {Version} (build {Build}, {Ignored}): {Count} files.",
+            "[PerfectWorldInstaller] Launcher manifest {Version} (build {Build}, {Ignored}): {Count} files.",
             manifest.ProductVersion, build ?? "?", version ?? "?", manifest.Files.Count);
 
         return manifest;
@@ -77,14 +77,14 @@ public partial class WanmeiGameInstaller
     private async Task<LauncherPlan> PrepareLauncherPlanAsync(string installPath, bool verifyHash,
         CancellationToken token)
     {
-        WanmeiLauncherManifest manifest = await GetLauncherManifestAsync(token).ConfigureAwait(false);
+        PerfectWorldLauncherManifest manifest = await GetLauncherManifestAsync(token).ConfigureAwait(false);
         string launcherRoot = Path.Combine(installPath, LauncherRootDirName);
 
-        var toDownload = new List<WanmeiLauncherFile>();
+        var toDownload = new List<PerfectWorldLauncherFile>();
         long totalZip = 0, existingZip = 0;
         int existingCount = 0;
 
-        foreach (WanmeiLauncherFile file in manifest.Files)
+        foreach (PerfectWorldLauncherFile file in manifest.Files)
         {
             token.ThrowIfCancellationRequested();
             totalZip += file.ZipSize;
@@ -142,7 +142,7 @@ public partial class WanmeiGameInstaller
     ///     Downloads a single launcher file's <c>.zip</c> blob (resumable, CDN fallback), verifies its zip MD5,
     ///     inflates it, verifies the inflated MD5 and atomically moves it into <c>NTELauncher\{path}</c>.
     /// </summary>
-    private async Task DownloadAndInflateLauncherFileAsync(WanmeiLauncherManifest manifest, WanmeiLauncherFile file,
+    private async Task DownloadAndInflateLauncherFileAsync(PerfectWorldLauncherManifest manifest, PerfectWorldLauncherFile file,
         string launcherRoot, CancellationToken token, Action<long> onBytes)
     {
         string destPath = Path.Combine(launcherRoot, file.Path.Replace('/', Path.DirectorySeparatorChar));
@@ -187,10 +187,10 @@ public partial class WanmeiGameInstaller
     /// <summary>
     ///     Downloads a launcher file's zip blob, trying every configured launcher CDN root and resuming per CDN.
     /// </summary>
-    private async Task DownloadLauncherZipAsync(string versionDir, WanmeiLauncherFile file, string tempPath,
+    private async Task DownloadLauncherZipAsync(string versionDir, PerfectWorldLauncherFile file, string tempPath,
         CancellationToken token, Action<long> onBytes)
     {
-        WanmeiGameConfig config = Manager.Config;
+        PerfectWorldGameConfig config = Manager.Config;
         Exception? lastError = null;
 
         for (int cdnIndex = 0; cdnIndex < config.LauncherCdnUrls.Length; cdnIndex++)
@@ -205,7 +205,7 @@ public partial class WanmeiGameInstaller
             {
                 lastError = ex;
                 SharedStatic.InstanceLogger.LogWarning(
-                    "[WanmeiInstaller] Launcher CDN #{Index} failed for {Path}: {Msg}", cdnIndex, file.Path, ex.Message);
+                    "[PerfectWorldInstaller] Launcher CDN #{Index} failed for {Path}: {Msg}", cdnIndex, file.Path, ex.Message);
             }
         }
 

@@ -18,9 +18,9 @@ Currently included:
 ```
 Hi3Helper.Plugin.PerfectWorld/
 ├── Hi3Helper.Plugin.Core/        # Collapse plugin SDK (git submodule, upstream)
-├── Hi3Helper.Wanmei.Core/        # Shared "Perfect World" publisher core (assembly: Wanmei.Core)
+├── Hi3Helper.PerfectWorld.Core/  # Shared "Perfect World" publisher core (assembly: PerfectWorld.Core)
 │   ├── Utils/PatcherXml0.cs      #   PatcherXML0 manifest decoder (AES-128-CBC + zlib)
-│   ├── WanmeiGameConfig.cs       #   Per-game config + CDN URL builders
+│   ├── PerfectWorldGameConfig.cs #   Per-game config + CDN URL builders
 │   └── Management/               #   Version manager + content-addressed download & HDiffPatch delta engine
 ├── Hi3Helper.Plugin.NTE/         # Thin plugin for NTE (assembly: NTE)
 │   ├── Management/PresetConfig/  #   NTE-specific data (app id, CDN, exe path, launch args)
@@ -32,7 +32,7 @@ Hi3Helper.Plugin.PerfectWorld/
 
 The design mirrors the official plugin repos: a **thin plugin** (game-specific data only) on top of a
 **reusable publisher core**. To support another `pw_sdk` game you generally only need a new thin plugin
-project that supplies its App ID, CDN host and launch arguments — `Wanmei.Core` handles the rest.
+project that supplies its App ID, CDN host and launch arguments — `PerfectWorld.Core` handles the rest.
 
 ## Prerequisites
 
@@ -127,10 +127,10 @@ The Perfect World PatcherSDK ships its file manifests encrypted as `PatcherXML0`
 * **Key** = `"<appId>@Patcher"` right-padded with `'0'` to 16 bytes (NTE → `1289@Patcher0000`).
 * **IV**  = `"PatcherSDK"` right-padded with `'0'` to 16 bytes (`PatcherSDK000000`).
 
-`Wanmei.Core` fetches `config.xml`, downloads and decrypts the versioned `ResList.bin.zip`, then
+`PerfectWorld.Core` fetches `config.xml`, downloads and decrypts the versioned `ResList.bin.zip`, then
 downloads each content-addressed file from `.../publish_PC/Res/<md5[0]>/<md5>.<filesize>`, verifying MD5.
 
-**Incremental updates (HDiffPatch).** On update, `Wanmei.Core` also fetches and decrypts the versioned
+**Incremental updates (HDiffPatch).** On update, `PerfectWorld.Core` also fetches and decrypts the versioned
 `lastdiff.bin` patch manifest. For every changed file it looks for a binary delta whose source MD5 matches
 the local file and whose target MD5 matches the wanted file; when one exists (and is smaller than a full
 download) it downloads just that small `HDIFF13` patch blob, applies it locally with the managed
@@ -141,7 +141,7 @@ reconciliation is used. This keeps NTE updates small even though its UE5 IoStore
 multi-GB `.pak`/`.ucas` files.
 
 The **reported update size** reflects this too: when computing the remaining download for an update,
-`Wanmei.Core` credits each available delta (it subtracts the patch size from every changed file that has a
+`PerfectWorld.Core` credits each available delta (it subtracts the patch size from every changed file that has a
 usable patch), so the figure shown before you start matches the true, small incremental transfer instead of
 the full size of every changed multi-GB pak.
 

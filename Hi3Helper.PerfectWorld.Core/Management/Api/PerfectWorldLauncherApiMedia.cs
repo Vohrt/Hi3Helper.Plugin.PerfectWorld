@@ -12,13 +12,13 @@ using System.Threading.Tasks;
 using Hi3Helper.Plugin.Core;
 using Hi3Helper.Plugin.Core.Management.Api;
 using Hi3Helper.Plugin.Core.Utility;
-using Hi3Helper.Wanmei.Core.Utils;
+using Hi3Helper.PerfectWorld.Core.Utils;
 using Microsoft.Extensions.Logging;
 
-namespace Hi3Helper.Wanmei.Core.Management.Api;
+namespace Hi3Helper.PerfectWorld.Core.Management.Api;
 
 /// <summary>
-///     Background (image + video) provider for Wanmei (Perfect World) <c>pw_sdk</c> launchers.
+///     Background (image + video) provider for Perfect World <c>pw_sdk</c> launchers.
 ///     <para>
 ///         The official launcher stores its home background under the self-update tree:
 ///         <c>Version.ini → FileListURL → AllFiles.xml</c> lists a <c>bgimgs/</c> folder whose files are
@@ -34,15 +34,15 @@ namespace Hi3Helper.Wanmei.Core.Management.Api;
 ///     </para>
 /// </summary>
 [GeneratedComClass]
-public partial class WanmeiLauncherApiMedia : LauncherApiMediaBase
+public partial class PerfectWorldLauncherApiMedia : LauncherApiMediaBase
 {
-    private readonly WanmeiGameConfig _config;
+    private readonly PerfectWorldGameConfig _config;
     private readonly bool             _enableVideo;
 
     private string? _backgroundImagePath;
     private string? _backgroundVideoPath;
 
-    public WanmeiLauncherApiMedia(WanmeiGameConfig config, bool enableVideoBackground = true)
+    public PerfectWorldLauncherApiMedia(PerfectWorldGameConfig config, bool enableVideoBackground = true)
     {
         _config      = config;
         _enableVideo = enableVideoBackground;
@@ -81,13 +81,13 @@ public partial class WanmeiLauncherApiMedia : LauncherApiMediaBase
                 catch (Exception ex) when (ex is not OperationCanceledException)
                 {
                     SharedStatic.InstanceLogger.LogWarning(
-                        "[WanmeiMedia] Version.ini fetch failed for {Cdn}: {Msg}", cdnRoot, ex.Message);
+                        "[PerfectWorldMedia] Version.ini fetch failed for {Cdn}: {Msg}", cdnRoot, ex.Message);
                 }
             }
 
             if (string.IsNullOrEmpty(fileListUrl))
             {
-                SharedStatic.InstanceLogger.LogWarning("[WanmeiMedia] Could not resolve FileListURL; serving no background.");
+                SharedStatic.InstanceLogger.LogWarning("[PerfectWorldMedia] Could not resolve FileListURL; serving no background.");
                 return 0;
             }
 
@@ -100,7 +100,7 @@ public partial class WanmeiLauncherApiMedia : LauncherApiMediaBase
             Dictionary<string, BgFileEntry> bgFiles = ParseBgImgsEntries(allFilesXml);
             if (bgFiles.Count == 0)
             {
-                SharedStatic.InstanceLogger.LogWarning("[WanmeiMedia] No bgimgs entries found in AllFiles.xml.");
+                SharedStatic.InstanceLogger.LogWarning("[PerfectWorldMedia] No bgimgs entries found in AllFiles.xml.");
                 return 0;
             }
 
@@ -114,17 +114,17 @@ public partial class WanmeiLauncherApiMedia : LauncherApiMediaBase
                 {
                     byte[] configZip   = await ApiResponseHttpClient
                         .GetByteArrayAsync(BuildAssetUrl(baseUrl, configEntry.Path), token).ConfigureAwait(false);
-                    byte[] configBytes = WanmeiZipUtility.ExtractSingleEntry(configZip, "config.json");
+                    byte[] configBytes = PerfectWorldZipUtility.ExtractSingleEntry(configZip, "config.json");
                     ParseBgConfig(configBytes, ref imageFile, ref staticFile, ref videoFile);
                 }
                 catch (Exception ex) when (ex is not OperationCanceledException)
                 {
                     SharedStatic.InstanceLogger.LogWarning(
-                        "[WanmeiMedia] config.json parse failed, using defaults: {Msg}", ex.Message);
+                        "[PerfectWorldMedia] config.json parse failed, using defaults: {Msg}", ex.Message);
                 }
             }
 
-            string cacheDir = Path.Combine(Path.GetTempPath(), "CollapseWanmeiMedia", _config.AppId);
+            string cacheDir = Path.Combine(Path.GetTempPath(), "CollapsePerfectWorldMedia", _config.AppId);
             Directory.CreateDirectory(cacheDir);
 
             // 4. Cache the static image (index 0). Fall back to the no-video image if the primary is absent.
@@ -140,7 +140,7 @@ public partial class WanmeiLauncherApiMedia : LauncherApiMediaBase
             }
 
             SharedStatic.InstanceLogger.LogInformation(
-                "[WanmeiMedia] Background ready. Image='{Image}', Video='{Video}'",
+                "[PerfectWorldMedia] Background ready. Image='{Image}', Video='{Video}'",
                 _backgroundImagePath ?? "<none>", _backgroundVideoPath ?? "<none>");
             return 0;
         }
@@ -150,7 +150,7 @@ public partial class WanmeiLauncherApiMedia : LauncherApiMediaBase
         }
         catch (Exception ex)
         {
-            SharedStatic.InstanceLogger.LogError("[WanmeiMedia] Failed to init media: {Ex}", ex);
+            SharedStatic.InstanceLogger.LogError("[PerfectWorldMedia] Failed to init media: {Ex}", ex);
             return 0; // Best-effort: on failure Collapse falls back to the plugin's embedded poster.
         }
     }
@@ -228,12 +228,12 @@ public partial class WanmeiLauncherApiMedia : LauncherApiMediaBase
         {
             byte[] zipBytes = await ApiResponseHttpClient
                 .GetByteArrayAsync(BuildAssetUrl(baseUrl, entry.Path), token).ConfigureAwait(false);
-            byte[] fileBytes = WanmeiZipUtility.ExtractSingleEntry(zipBytes, fileName);
+            byte[] fileBytes = PerfectWorldZipUtility.ExtractSingleEntry(zipBytes, fileName);
 
             if (entry.Size > 0 && fileBytes.Length != entry.Size)
             {
                 SharedStatic.InstanceLogger.LogWarning(
-                    "[WanmeiMedia] Size mismatch for {File}: expected {Expected}, got {Actual}.",
+                    "[PerfectWorldMedia] Size mismatch for {File}: expected {Expected}, got {Actual}.",
                     fileName, entry.Size, fileBytes.Length);
             }
 
@@ -242,7 +242,7 @@ public partial class WanmeiLauncherApiMedia : LauncherApiMediaBase
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            SharedStatic.InstanceLogger.LogWarning("[WanmeiMedia] Failed to cache {File}: {Msg}", fileName, ex.Message);
+            SharedStatic.InstanceLogger.LogWarning("[PerfectWorldMedia] Failed to cache {File}: {Msg}", fileName, ex.Message);
             return null;
         }
     }
