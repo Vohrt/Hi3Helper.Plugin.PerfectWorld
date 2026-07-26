@@ -1,5 +1,6 @@
 using System;
 using System.Globalization;
+using System.IO;
 
 namespace Hi3Helper.PerfectWorld.Core;
 
@@ -87,6 +88,47 @@ public sealed class PerfectWorldGameConfig
     ///     are not left hidden). Only relevant when the host is elevated.
     /// </summary>
     public int LauncherStartupRevealTimeoutSeconds { get; init; } = 120;
+
+    /// <summary>
+    ///     Install-relative directory that holds the vendor launcher (the self-update target of the launcher
+    ///     <c>AllFiles.xml</c> manifest and the location of the official <c>PatcherSDK\config.xml</c>), e.g.
+    ///     <c>NTELauncher</c> for 异环 or <c>P5XLaunch</c> for P5X.
+    /// </summary>
+    public string LauncherRootDirName { get; init; } = "NTELauncher";
+
+    /// <summary>
+    ///     Install-relative directory that holds the extracted game content, removed on uninstall, e.g.
+    ///     <c>Client</c> for 异环 or <c>client</c> for P5X.
+    /// </summary>
+    public string ContentRootDirName { get; init; } = "Client";
+
+    /// <summary>
+    ///     Path (relative to the vendor launcher directory, i.e. <see cref="LauncherRootDirName"/>) of the launcher
+    ///     log that is tailed during a silent launch to detect an interactive-login requirement, e.g.
+    ///     <c>UserData\Log\NTEGame.log</c>.
+    /// </summary>
+    public string LauncherLogRelativePath { get; init; } = Path.Combine("UserData", "Log", "NTEGame.log");
+
+    /// <summary>
+    ///     Substrings that, when found in the launcher log, indicate that the cached-token auto-login failed and an
+    ///     interactive login UI must be revealed to the user. Used only during a silent launch.
+    /// </summary>
+    public string[] LoginNeededLogMarkers { get; init; } =
+        ["onAutoLoginFailed", "onAutoLoginTimeOut", "autoLoginTokenError", "needLoginFirst"];
+
+    /// <summary>
+    ///     INI section header (including brackets) inside <see cref="LauncherSettingsIniRelativePath"/> under which
+    ///     the silent-launch keys live, e.g. <c>[Setting]</c>.
+    /// </summary>
+    public string LauncherSettingsSectionName { get; init; } = "[Setting]";
+
+    /// <summary>
+    ///     Key/value pairs written into the launcher's <see cref="LauncherSettingsSectionName"/> section to make it
+    ///     silence itself (auto-login, auto-start the game, quit together with the game and not reappear afterwards).
+    ///     Keys the vendor launcher does not recognise are harmlessly ignored.
+    /// </summary>
+    public (string Key, string Value)[] LauncherSilentSettings { get; init; } =
+        [("autoLogin", "1"), ("autoRun", "1"), ("quitWithGame", "1"), ("showAfterGameQuit", "0")];
 
     private string PrimaryGameResCdn =>
         GameResCdnUrls is { Length: > 0 } ? GameResCdnUrls[0].TrimEnd('/') : string.Empty;

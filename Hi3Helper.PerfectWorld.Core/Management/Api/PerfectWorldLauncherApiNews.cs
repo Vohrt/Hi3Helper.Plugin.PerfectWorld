@@ -257,7 +257,7 @@ public partial class PerfectWorldLauncherApiNews : LauncherApiNewsBase
         return items;
     }
 
-    private static List<CarouselItem> ParseCarousel(string js)
+    private List<CarouselItem> ParseCarousel(string js)
     {
         var items = new List<CarouselItem>();
 
@@ -269,7 +269,8 @@ public partial class PerfectWorldLauncherApiNews : LauncherApiNewsBase
         }
 
         using var doc = JsonDocument.Parse(js.Substring(start, end - start + 1));
-        if (!doc.RootElement.TryGetProperty("lb1", out JsonElement lb1) || lb1.ValueKind != JsonValueKind.Array)
+        if (!doc.RootElement.TryGetProperty(_config.BannerJsCarouselKey, out JsonElement lb1) ||
+            lb1.ValueKind != JsonValueKind.Array)
         {
             return items;
         }

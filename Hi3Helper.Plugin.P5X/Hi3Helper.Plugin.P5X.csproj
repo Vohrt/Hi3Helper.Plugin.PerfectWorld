@@ -1,0 +1,42 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+    <PropertyGroup>
+        <TargetFramework>net10.0</TargetFramework>
+        <ImplicitUsings>disable</ImplicitUsings>
+        <Nullable>enable</Nullable>
+        <Platforms>x64</Platforms>
+        <InvariantGlobalization>true</InvariantGlobalization>
+        <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+        <DebugType>embedded</DebugType>
+        <Deterministic>true</Deterministic>
+        <LangVersion>preview</LangVersion>
+        <AssemblyName>P5X</AssemblyName>
+        <ProductName>Persona 5: The Phantom X Plugin</ProductName>
+        <Product>Collapse</Product>
+        <Description>This library is a plugin for adding support for the game "Persona 5: The Phantom X" (P5X) into Collapse Launcher</Description>
+        <AssemblyTitle>Persona 5: The Phantom X Plugin</AssemblyTitle>
+        <Company>CollapsePlugin</Company>
+        <Authors>$(Company).</Authors>
+        <Copyright>Copyright 2026 $(Company)</Copyright>
+        <Version>1.0.0</Version>
+        <ApplicationIcon>icon.ico</ApplicationIcon>
+        <Configurations>Debug;Release;DebugNoReflection;ReleaseNoReflection</Configurations>
+        <Title>Hi3Helper.Plugin.P5X</Title>
+    </PropertyGroup>
+
+    <PropertyGroup Condition="'$(Configuration)'=='DebugNoReflection'">
+        <DefineConstants>$(DefineConstants);DEBUG;USELIGHTWEIGHTJSONPARSER</DefineConstants>
+        <Optimize>false</Optimize>
+    </PropertyGroup>
+
+    <PropertyGroup Condition="'$(Configuration)'=='ReleaseNoReflection'">
+        <DefineConstants>$(DefineConstants);USELIGHTWEIGHTJSONPARSER</DefineConstants>
+        <Optimize>true</Optimize>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <ProjectReference Include="..\Hi3Helper.Plugin.Core\Hi3Helper.Plugin.Core.csproj"/>
+        <ProjectReference Include="..\Hi3Helper.PerfectWorld.Core\Hi3Helper.PerfectWorld.Core.csproj"/>
+    </ItemGroup>
+
+</Project>

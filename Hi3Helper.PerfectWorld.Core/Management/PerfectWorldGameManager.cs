@@ -141,7 +141,7 @@ public partial class PerfectWorldGameManager : GameManagerBase
 
         // Fallback: the official launcher stores a plaintext config.xml with <ResVersion>.
         string officialConfig = Path.Combine(CurrentGameInstallPath,
-            "NTELauncher", "UserData", "Patcher", "PatcherSDK", "config.xml");
+            _config.LauncherRootDirName, "UserData", "Patcher", "PatcherSDK", "config.xml");
         if (File.Exists(officialConfig))
         {
             try

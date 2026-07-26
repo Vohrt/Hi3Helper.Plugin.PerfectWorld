@@ -5,7 +5,7 @@ using System.Threading.Tasks;
 using Hi3Helper.Plugin.Core.Utility;
 using Hi3Helper.PerfectWorld.Core.Management;
 
-namespace Hi3Helper.Plugin.NTE;
+namespace Hi3Helper.Plugin.P5X;
 
 public partial class Exports
 {

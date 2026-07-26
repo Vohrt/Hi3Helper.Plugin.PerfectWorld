@@ -65,11 +65,13 @@ dotnet build Hi3Helper.Plugin.PerfectWorld.slnx -c Debug
 ### 正式发布（NativeAOT，需在 *x64 Native Tools 命令提示符* 中运行）
 
 ```bat
-CompileAOTAndShip.bat 2
+CompileAOTAndShip.bat 1 2
 ```
 
-参数用于选择优化档位（`1` 体积、`2` 速度、`3` 调试、`4-6` = 对应档位 + 实验性的“无反射”模式）。
-产物（含已生成的索引清单）位于 `Hi3Helper.Plugin.NTE\publish\<配置名>`。
+不带参数运行会进入交互式选择：**先选择要编译的游戏**（`1` NTE、`2` P5X），再选择优化档位
+（`1` 体积、`2` 速度、`3` 调试、`4-6` = 对应档位 + 实验性的“无反射”模式）。也可按位置直接传参
+`CompileAOTAndShip.bat <游戏> <优化档位>`（例如 `1 2` = NTE + 速度）。
+产物（含已生成的索引清单）位于 `Hi3Helper.Plugin.<NTE|P5X>\publish\<配置名>`。
 
 等价的手动发布命令：
 

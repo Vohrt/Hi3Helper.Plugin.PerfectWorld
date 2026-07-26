@@ -65,12 +65,14 @@ dotnet build Hi3Helper.Plugin.PerfectWorld.slnx -c Debug
 ### Ship it (NativeAOT, from a *Developer Command Prompt / x64 Native Tools* shell)
 
 ```bat
-CompileAOTAndShip.bat 2
+CompileAOTAndShip.bat 1 2
 ```
 
-The argument selects the optimization profile (`1` Size, `2` Speed, `3` Debug, `4-6` = the same with the
-experimental *Reflection-Free* mode). The output — including the indexed manifest — lands in
-`Hi3Helper.Plugin.NTE\publish\<Configuration>`.
+Run with no arguments to be prompted interactively — it asks **which game** to build first
+(`1` NTE, `2` P5X), then the **optimization** profile (`1` Size, `2` Speed, `3` Debug, `4-6` = the same
+with the experimental *Reflection-Free* mode). Both can also be passed positionally as
+`CompileAOTAndShip.bat <game> <optimization>` (e.g. `1 2` = NTE + Speed). The output — including the
+indexed manifest — lands in `Hi3Helper.Plugin.<NTE|P5X>\publish\<Configuration>`.
 
 Equivalent manual publish:
 

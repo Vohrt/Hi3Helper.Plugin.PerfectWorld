@@ -1,22 +1,46 @@
 @echo off
-set _pluginName=Hi3Helper.Plugin.NTE
 set _solutionName=Hi3Helper.Plugin.PerfectWorld.slnx
 set _isRemoveSymbol=true
 
 set currentPath=%~dp0
-set projectPath=%currentPath%%_pluginName%
 set indexerPath=%currentPath%Indexer
-set projectPublishPath=%projectPath%\publish
 set indexerPublishPath=%indexerPath%\Compiled
 set indexerToolPath=%currentPath%Indexer.exe
 set thread=%NUMBER_OF_PROCESSORS%
-set args1=%1
+set gameArg=%1
+set speedArg=%2
+set entryArg=%1
 
 %~d0
 cd %currentPath%
 
+:CompileGamePreference
+set gameChoice=%gameArg%
+if "%gameChoice%" == "" (
+    echo Please select which game plugin to compile:
+    echo   1. NTE ^(Neverness To Everness^)
+    echo   2. P5X ^(Persona 5: The Phantom X^)
+    echo.
+    set /p gameChoice=Choice^?^> 
+)
+
+if "%gameChoice%" == "1" (
+  echo Selected game plugin: NTE ^(Hi3Helper.Plugin.NTE^)
+  set _pluginName=Hi3Helper.Plugin.NTE
+  goto :CompileSpeedPreference
+) else if "%gameChoice%" == "2" (
+  echo Selected game plugin: P5X ^(Hi3Helper.Plugin.P5X^)
+  set _pluginName=Hi3Helper.Plugin.P5X
+  goto :CompileSpeedPreference
+)
+
+cls
+echo Input is not valid! Available choices: 1 or 2
+set gameArg=
+goto :CompileGamePreference
+
 :CompileSpeedPreference
-set speedChoice=%args1%
+set speedChoice=%speedArg%
 if "%speedChoice%" == "" (
     echo Please define which optimization to use:
     echo   1. Size ^(same as -O1 optimization with debug info and stack trace stripped^)
@@ -70,10 +94,12 @@ if "%speedChoice%" == "1" (
 cls
 echo Input is not valid! Available choices: 1, 2, 3, 4, 5 or 6
 set publishProfile=
-set args1=
+set speedArg=
 goto :CompileSpeedPreference
 
 :StartCompilation
+set projectPath=%currentPath%%_pluginName%
+set projectPublishPath=%projectPath%\publish
 set outputBaseDirPath=%projectPublishPath%\%configuration%
 set outputDirPath=%outputBaseDirPath%
 %~d0
@@ -110,7 +136,7 @@ echo.
 goto :End
 
 :End
-if "%args1%" == "" (
+if "%entryArg%" == "" (
     pause | echo Press any key to exit...
 )
 cd "%currentPath%"

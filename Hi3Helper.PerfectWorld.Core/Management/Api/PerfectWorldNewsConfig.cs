@@ -25,6 +25,12 @@ public sealed class PerfectWorldNewsConfig
     /// </summary>
     public string? BannerJsUrl { get; init; }
 
+    /// <summary>
+    ///     Name of the JSON array property inside <see cref="BannerJsUrl"/> that holds the launcher carousel entries,
+    ///     e.g. <c>lb1</c> for 异环 or <c>PC_Launcher</c> for P5X.
+    /// </summary>
+    public string BannerJsCarouselKey { get; init; } = "lb1";
+
     /// <summary>Optional <c>Referer</c> header sent with every request (some CDNs require it).</summary>
     public string? Referer { get; init; }
 }

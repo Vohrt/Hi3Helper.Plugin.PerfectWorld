@@ -148,7 +148,7 @@ public partial class PerfectWorldGameInstaller : GameInstallerBase
 
         try
         {
-            string clientDir = Path.Combine(installPath, "Client");
+            string clientDir = Path.Combine(installPath, Manager.Config.ContentRootDirName);
             if (Directory.Exists(clientDir)) Directory.Delete(clientDir, true);
 
             string launcherDir = Path.Combine(installPath, LauncherRootDirName);

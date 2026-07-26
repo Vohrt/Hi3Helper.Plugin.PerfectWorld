@@ -15,7 +15,7 @@ namespace Hi3Helper.PerfectWorld.Core.Management;
 public partial class PerfectWorldGameInstaller
 {
     /// <summary>Install-relative directory that holds the vendor launcher (self-update target of AllFiles.xml).</summary>
-    private const string LauncherRootDirName = "NTELauncher";
+    private string LauncherRootDirName => Manager.Config.LauncherRootDirName;
 
     /// <summary>
     ///     The download+install plan for the vendor launcher: which files still need fetching plus the byte/count

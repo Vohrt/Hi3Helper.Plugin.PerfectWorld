@@ -15,4 +15,7 @@
   <Project Path="Hi3Helper.Plugin.NTE/Hi3Helper.Plugin.NTE.csproj">
     <Platform Project="x64" />
   </Project>
+  <Project Path="Hi3Helper.Plugin.P5X/Hi3Helper.Plugin.P5X.csproj">
+    <Platform Project="x64" />
+  </Project>
 </Solution>
