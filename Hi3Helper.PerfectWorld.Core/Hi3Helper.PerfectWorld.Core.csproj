@@ -38,8 +38,12 @@
     </ItemGroup>
 
     <ItemGroup>
-        <!-- Managed HDiffPatch applier for block-level incremental updates (pw_sdk uncompressed HDIFF13 diffs). -->
-        <PackageReference Include="SharpHDiffPatch.Core" Version="2.3.4"/>
+        <!-- Managed HDiffPatch applier for block-level incremental updates (pw_sdk uncompressed HDIFF13 diffs).
+             Referenced from the in-repo submodule fork (Vohrt/SharpHDiffPatch.Core) instead of the upstream
+             NuGet package: the fork windows the in-memory output cache so patches whose target file exceeds
+             2 GiB apply successfully. The stock 2.3.4/2.4.0 package throws at the ~2 GiB MemoryStream limit,
+             which made every >2 GiB delta fall back to a full re-download. -->
+        <ProjectReference Include="..\SharpHDiffPatch.Core\SharpHDiffPatch.Core\SharpHDiffPatch.Core.csproj"/>
     </ItemGroup>
 
 </Project>

@@ -9,6 +9,11 @@
   <Project Path="Hi3Helper.Plugin.Core/Hi3Helper.Plugin.Core.csproj">
     <Platform Project="x64" />
   </Project>
+  <Project Path="SharpHDiffPatch.Core/SharpHDiffPatch.Core/SharpHDiffPatch.Core.csproj">
+    <BuildType Solution="DebugNoReflection|*" Project="Debug" />
+    <BuildType Solution="ReleaseNoReflection|*" Project="Release" />
+    <Platform Project="x64" />
+  </Project>
   <Project Path="Hi3Helper.PerfectWorld.Core/Hi3Helper.PerfectWorld.Core.csproj">
     <Platform Project="x64" />
   </Project>
