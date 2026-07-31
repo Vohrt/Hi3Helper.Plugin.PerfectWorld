@@ -2,8 +2,11 @@ name: Release Plugin
 
 # Builds the NTE plugin, runs the Indexer to produce the Collapse release
 # bundle (per-file Brotli `.br` entries + manifest.json, packed into
-# `NTE_<version>_API-<standard>_<yyyyMMdd>.zip`), and publishes that zip to a
-# GitHub Release. Trigger it manually from the Actions tab.
+# `NTE_<version>_API-<standard>_<yyyyMMdd>.zip`), publishes that zip plus the
+# raw manifest.json + NTE.dll onto a GitHub Release, and pushes the auto-update
+# files (manifest.json + NTE.dll) into the per-plugin `NTE/` folder on the
+# `release` branch that the in-launcher self-updater reads from.
+# Trigger it manually from the Actions tab.
 on:
   workflow_dispatch:
     inputs:
@@ -98,6 +101,60 @@ jobs:
           name: NTE v${{ github.event.inputs.version }}
           generate_release_notes: true
           prerelease: ${{ github.event.inputs.prerelease }}
-          files: ./publish_output/*.zip
+          files: |
+            ./publish_output/*.zip
+            ./publish_output/manifest.json
+            ./publish_output/NTE.dll
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # The in-launcher self-updater (SelfUpdate.cs) reads manifest.json and the plugin
+      # DLL from the per-plugin folder on the `release` branch, served via
+      # raw.githubusercontent.com. Publish those two files there so update checks work.
+      # Uses the built-in GITHUB_TOKEN (same-repo push) — no extra secret required.
+      - name: Publish auto-update files to the release CDN branch
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SHORT: NTE
+          CDN_BRANCH: release
+        run: |
+          set -euo pipefail
+
+          SRC="publish_output"
+          WORKDIR="cdn-branch"
+          REMOTE="https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+
+          if [ ! -f "${SRC}/manifest.json" ] || [ ! -f "${SRC}/${SHORT}.dll" ]; then
+            echo "::error::Expected ${SRC}/manifest.json and ${SRC}/${SHORT}.dll to exist"
+            exit 1
+          fi
+
+          git config --global user.name  "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+
+          # Clone the CDN branch if it already exists, otherwise start a fresh orphan branch.
+          if git ls-remote --exit-code --heads "${REMOTE}" "${CDN_BRANCH}" >/dev/null 2>&1; then
+            git clone --branch "${CDN_BRANCH}" --single-branch --depth 1 "${REMOTE}" "${WORKDIR}"
+          else
+            git clone --depth 1 "${REMOTE}" "${WORKDIR}"
+            git -C "${WORKDIR}" checkout --orphan "${CDN_BRANCH}"
+            git -C "${WORKDIR}" rm -rf . >/dev/null 2>&1 || true
+          fi
+
+          # Keep every published file byte-exact; the updater verifies the DLL's MD5 hash.
+          git -C "${WORKDIR}" config core.autocrlf false
+          printf '* -text\n' > "${WORKDIR}/.gitattributes"
+
+          mkdir -p "${WORKDIR}/${SHORT}"
+          cp "${SRC}/manifest.json" "${WORKDIR}/${SHORT}/manifest.json"
+          cp "${SRC}/${SHORT}.dll"  "${WORKDIR}/${SHORT}/${SHORT}.dll"
+
+          git -C "${WORKDIR}" add -A
+          if git -C "${WORKDIR}" diff --cached --quiet; then
+            echo "No auto-update changes to publish."
+            exit 0
+          fi
+
+          git -C "${WORKDIR}" commit -m "Publish ${SHORT} v${{ github.event.inputs.version }} auto-update files"
+          git -C "${WORKDIR}" push "${REMOTE}" "HEAD:${CDN_BRANCH}"
