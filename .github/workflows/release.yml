@@ -81,14 +81,14 @@ jobs:
       matrix: ${{ fromJSON(needs.setup.outputs.matrix) }}
     steps:
       - name: Checkout code (with submodules)
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0
           submodules: recursive
           ref: ${{ github.ref }}
 
       - name: Setup .NET 10.0
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@v6
         with:
           dotnet-version: 10.0.x
 
@@ -136,7 +136,7 @@ jobs:
         run: Get-ChildItem ./publish_output -Recurse -File | Select-Object Length, FullName | Format-Table -AutoSize
 
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ matrix.game }}@v${{ github.event.inputs.version }}
           name: ${{ matrix.game }} v${{ github.event.inputs.version }}
