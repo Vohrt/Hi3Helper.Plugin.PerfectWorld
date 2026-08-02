@@ -10,6 +10,7 @@ Currently included:
 | Plugin | Game | App ID |
 | ------ | ---- | ------ |
 | `Hi3Helper.Plugin.NTE` | **Neverness To Everness** (异环) | `1289` |
+| `Hi3Helper.Plugin.P5X` | **Persona 5: The Phantom X** | `1264` |
 
 ---
 
@@ -18,21 +19,29 @@ Currently included:
 ```
 Hi3Helper.Plugin.PerfectWorld/
 ├── Hi3Helper.Plugin.Core/        # Collapse plugin SDK (git submodule, upstream)
+├── SharpHDiffPatch.Core/         # HDiffPatch patcher (git submodule, in-repo fork with the >2 GB fix)
 ├── Hi3Helper.PerfectWorld.Core/  # Shared "Perfect World" publisher core (assembly: PerfectWorld.Core)
 │   ├── Utils/PatcherXml0.cs      #   PatcherXML0 manifest decoder (AES-128-CBC + zlib)
 │   ├── PerfectWorldGameConfig.cs #   Per-game config + CDN URL builders
 │   └── Management/               #   Version manager + content-addressed download & HDiffPatch delta engine
 ├── Hi3Helper.Plugin.NTE/         # Thin plugin for NTE (assembly: NTE)
 │   ├── Management/PresetConfig/  #   NTE-specific data (app id, CDN, exe path, launch args)
+│   ├── SelfUpdate.cs             #   In-launcher self-update endpoints (release branch)
+│   └── Properties/PublishProfiles/
+├── Hi3Helper.Plugin.P5X/         # Thin plugin for P5X (assembly: P5X)
+│   ├── Management/PresetConfig/  #   P5X-specific data (app id, CDN, exe path, launch args)
+│   ├── SelfUpdate.cs             #   In-launcher self-update endpoints (release branch)
 │   └── Properties/PublishProfiles/
 ├── Hi3Helper.Plugin.PerfectWorld.slnx
-├── CompileAOTAndShip.bat         # One-click NativeAOT build + index
+├── CompileAOTAndShip.bat         # One-click NativeAOT build + index (pick NTE or P5X)
 └── Indexer.exe                   # Generates the plugin manifest Collapse consumes
 ```
 
 The design mirrors the official plugin repos: a **thin plugin** (game-specific data only) on top of a
 **reusable publisher core**. To support another `pw_sdk` game you generally only need a new thin plugin
 project that supplies its App ID, CDN host and launch arguments — `PerfectWorld.Core` handles the rest.
+The **NTE** and **P5X** plugins are built exactly this way, sharing the same core, download/patch engine and
+launch driver.
 
 ## Prerequisites
 
@@ -42,7 +51,8 @@ project that supplies its App ID, CDN host and launch arguments — `PerfectWorl
 
 ## Getting the source
 
-This repo uses a git submodule for the Collapse plugin SDK, so clone **recursively**:
+This repo uses git submodules (the Collapse plugin SDK and a patched `SharpHDiffPatch.Core`), so clone
+**recursively**:
 
 ```bash
 git clone --recursive https://github.com/<you>/Hi3Helper.Plugin.PerfectWorld.git
@@ -74,22 +84,28 @@ with the experimental *Reflection-Free* mode). Both can also be passed positiona
 `CompileAOTAndShip.bat <game> <optimization>` (e.g. `1 2` = NTE + Speed). The output — including the
 indexed manifest — lands in `Hi3Helper.Plugin.<NTE|P5X>\publish\<Configuration>`.
 
-Equivalent manual publish:
+Equivalent manual publish (swap the project for the game you want):
 
 ```bash
+# NTE
 dotnet publish Hi3Helper.Plugin.NTE/Hi3Helper.Plugin.NTE.csproj -c Release -r win-x64 -p:PublishProfile=ReleasePublish-O2
+# P5X
+dotnet publish Hi3Helper.Plugin.P5X/Hi3Helper.Plugin.P5X.csproj -c Release -r win-x64 -p:PublishProfile=ReleasePublish-O2
 ```
 
-This produces the native COM DLL **`NTE.dll`** that Collapse loads (it exports `TryGetApiExport`).
+This produces the native COM DLL Collapse loads — **`NTE.dll`** or **`P5X.dll`** (each exports `TryGetApiExport`).
 
 ## Creating a release bundle
 
 Collapse distributes a plugin as a small bundle produced by **`Indexer.exe`**: it reads the published
 plugin, writes a `manifest.json` (plugin name, author, version, icon and a per-asset MD5 table),
 individually **Brotli-compresses** every file to `.br`, and stores them in a single zip named
+`<SHORT>_<version>_API-<standardVersion>_<yyyyMMdd>.zip`, where `<SHORT>` is the plugin short name
+(`NTE` or `P5X`):
 
 ```
-NTE_<version>_API-<standardVersion>_<yyyyMMdd>.zip   e.g. NTE_1.0.0.0_API-0.1.5.0_20260724.zip
+NTE_1.0.0.0_API-0.1.5.0_20260724.zip
+P5X_1.0.0.0_API-0.1.5.0_20260724.zip
 ```
 
 ### Locally
@@ -113,34 +129,64 @@ The **Release Plugin** workflow (`.github/workflows/release.yml`) does the whole
   reflection-free variant
 
 The run publishes `NTE_<version>_API-<standardVersion>_<date>.zip` to a new release tagged
-`NTE@v<version>`. No extra secrets are required — it uses the built-in `GITHUB_TOKEN`.
+`NTE@v<version>`, and also pushes the freshly-built `manifest.json` + `NTE.dll` onto the repo's `release`
+branch (under `NTE/`) so the in-launcher self-updater can pick them up (see
+[Automatic updates](#automatic-updates-self-update) below). No extra secrets are required — it uses the
+built-in `GITHUB_TOKEN`. The workflow currently builds the **NTE** plugin; **P5X** ships the same way (same
+publish profiles and Indexer) through an equivalent run.
 
 ## Installing into Collapse
 
-Copy the published output (the indexed `publish\Release` folder, containing `NTE.dll` and the generated
-manifest) into Collapse's plugin directory, then (re)start Collapse. The plugin registers the game,
-its icon/poster, install/update flow and launch action.
+Copy the published output (the indexed `publish\Release` folder, containing the plugin DLL — `NTE.dll` or
+`P5X.dll` — and the generated manifest) into Collapse's plugin directory, then (re)start Collapse. The plugin
+registers the game, its icon/poster, install/update flow and launch action.
 
-## How it works (NTE)
+## Automatic updates (self-update)
+
+Once a plugin is installed, Collapse keeps it up to date automatically — no manual re-copy on every release.
+On start-up Collapse hands the plugin's self-updater (`SelfUpdate.cs`, a `PluginSelfUpdateBase`) a small
+`manifest.json`, which it compares against the local files and, when a newer build is published, downloads the
+changed plugin DLL (`NTE.dll` / `P5X.dll`) and verifies it by MD5 before swapping it in.
+
+The endpoints are the per-plugin folders on this repository's **`release` branch**, read through two mirrors
+of the same content (a `raw.githubusercontent.com` primary + a `github.com/.../raw/...` fallback):
+
+```
+https://raw.githubusercontent.com/<owner>/Hi3Helper.Plugin.PerfectWorld/release/<SHORT>/manifest.json
+https://raw.githubusercontent.com/<owner>/Hi3Helper.Plugin.PerfectWorld/release/<SHORT>/<SHORT>.dll
+```
+
+where `<SHORT>` is `NTE` or `P5X`. Those folders are populated automatically by the **Release Plugin**
+workflow, which pushes the freshly-built `manifest.json` + plugin DLL onto the `release` branch on every
+release. The endpoints are hard-coded in each plugin's `SelfUpdate.cs`, so a fork should repoint them at its
+own `release` branch.
+
+## How it works
 
 The Perfect World PatcherSDK ships its file manifests encrypted as `PatcherXML0`:
 
 * Body = `AES-128-CBC( zlib.deflate(xml) + PKCS7 )`, prefixed by a 12-byte magic and the inflated size.
-* **Key** = `"<appId>@Patcher"` right-padded with `'0'` to 16 bytes (NTE → `1289@Patcher0000`).
+* **Key** = `"<appId>@Patcher"` right-padded with `'0'` to 16 bytes (NTE → `1289@Patcher0000`, P5X → `1264@Patcher0000`).
 * **IV**  = `"PatcherSDK"` right-padded with `'0'` to 16 bytes (`PatcherSDK000000`).
 
 `PerfectWorld.Core` fetches `config.xml`, downloads and decrypts the versioned `ResList.bin.zip`, then
-downloads each content-addressed file from `.../publish_PC/Res/<md5[0]>/<md5>.<filesize>`, verifying MD5.
+downloads each content-addressed file from `.../<branch>/Res/<md5[0]>/<md5>.<filesize>`, verifying MD5. Only
+the App ID, CDN host and resource branch differ per game (NTE → `publish_PC` on `yhcdn*.wmupd.com`; P5X →
+`CN_OB_OFFICIAL` on `nsywl-client-dev*.wmupd.com`).
 
 **Incremental updates (HDiffPatch).** On update, `PerfectWorld.Core` also fetches and decrypts the versioned
 `lastdiff.bin` patch manifest. For every changed file it looks for a binary delta whose source MD5 matches
 the local file and whose target MD5 matches the wanted file; when one exists (and is smaller than a full
-download) it downloads just that small `HDIFF13` patch blob, applies it locally with the managed
-[`SharpHDiffPatch.Core`](https://github.com/CollapseLauncher/SharpHDiffPatch.Core) patcher, and verifies the
-result by MD5. Files with no usable patch — or whose patch fails to apply/verify — transparently fall back to
-a full content-addressed download, and if the whole `lastdiff` manifest is unavailable the classic full-file
-reconciliation is used. This keeps NTE updates small even though its UE5 IoStore packs everything into a few
-multi-GB `.pak`/`.ucas` files.
+download) it downloads just that small `HDIFF13` patch blob, applies it locally with the in-repo
+[`SharpHDiffPatch.Core`](https://github.com/Vohrt/SharpHDiffPatch.Core) fork (a git submodule), and verifies
+the result by MD5. That fork is what keeps large updates small: the upstream patcher buffers each patch's
+output in a single in-memory stream and throws on target files larger than ~2 GiB, so before the fix every
+changed file above that size (NTE's `.pak`/`.ucas` chunks run 4–7 GB) silently fell back to a full
+re-download — turning a ~160 MB incremental update into ~17 GB. The fork windows that output cache so those
+multi-GB files patch correctly with bounded (~256 MiB) memory. Files with no usable patch — or whose patch
+fails to apply/verify — transparently fall back to a full content-addressed download, and if the whole
+`lastdiff` manifest is unavailable the classic full-file reconciliation is used. This keeps updates small even
+though NTE's UE5 IoStore packs everything into a few multi-GB `.pak`/`.ucas` files.
 
 The **reported update size** reflects this too: when computing the remaining download for an update,
 `PerfectWorld.Core` credits each available delta (it subtracts the patch size from every changed file that has a
@@ -148,8 +194,9 @@ usable patch), so the figure shown before you start matches the true, small incr
 the full size of every changed multi-GB pak.
 
 **Launcher content (background, news, banners, social).** The plugin also fills Collapse's home screen
-straight from Perfect World's live web sources — `pw_sdk` has no public launcher-media JSON API, so each
-element is derived from what the official launcher itself uses:
+straight from Perfect World's live web sources (NTE from `yh.wanmei.com`, P5X from `p5x.wanmei.com`) —
+`pw_sdk` has no public launcher-media JSON API, so each element is derived from what the official launcher
+itself uses:
 
 * **Background image & video** — taken from the launcher's own `bgimgs` set (`Version.ini` →
   `AllFiles.xml` → `config.json`). The static image and the video clip are downloaded, unzipped and cached
@@ -164,32 +211,36 @@ All of this relies only on AOT-safe primitives (`[GeneratedRegex]`, `JsonDocumen
 `System.IO.Compression`) and pulls in no third-party dependency. Every step is best-effort: if a source is
 unreachable the plugin just omits that element and Collapse falls back to its embedded poster.
 
-**Launching & login (vendor launcher).** NTE's account login is *not* handled by the game client itself: the
-sign-in UI, anti-cheat bring-up and the token hand-off to the game all live in Perfect World's own
-`NTELauncher`. Launching `HTGame.exe` directly therefore opens the game with no login prompt. To make the game
-actually playable, the plugin **downloads the official launcher as part of install/repair** — it reads the
-launcher self-update manifest (`.../publish_ob/launcher/Version.ini` → `AllFiles.xml`), then fetches, verifies
-and inflates each of its ~670 individually zip-compressed files into `NTELauncher\` (≈237 MB; zero-length
-entries carry a bogus placeholder checksum in the manifest and are validated by emptiness instead of MD5).
-Clicking **Launch** then runs `NTELauncher\NTELauncher.exe` with the working directory set to the install root
-— exactly like the official `异环` shortcut — so the launcher shows the login UI and starts the game normally.
-A finished install now requires both the game runtime (`HTGameBase.dll`) and the launcher entry point
-(`NTELauncher.exe`); an earlier launcher-less install is reported as *not installed* until a repair fetches it.
+**Game bring-up (vendor launcher & silent launch).** For **both** games, account login is *not* handled by
+the game client itself — the sign-in UI, anti-cheat bring-up and the token hand-off all live in Perfect
+World's own launcher app, so launching the bare game executable opens it with no login prompt. The plugin
+therefore **installs the vendor launcher as part of install/repair and launches through it**; a finished
+install consequently requires *both* the game runtime and the launcher entry point, and an earlier
+launcher-less install is reported as *not installed* until a repair fetches it. A shared, config-driven
+**silent launch** then keeps the launcher out of the way: right before every launch the plugin patches the
+launcher's own user-writable settings (`…\UserData\Config\Config.ini`) to auto-login, auto-start the game and
+quit together with it (never reappearing afterwards), tracks the real **game** process rather than the thin
+launcher shim (which exits within a second of spawning the game), and — when Collapse itself runs **as
+administrator** — hides the launcher window during the ~1-minute auto-login start-up, revealing it only if an
+interactive login is actually needed (first run / expired token) or after a safety timeout. Elevation is
+required for the window-hiding because the vendor game process is force-elevated and Windows UIPI blocks a
+non-elevated host from touching its window.
 
-**Silent launch.** So the vendor launcher does not get in the way, the plugin patches the launcher's own
-user-writable settings (`NTELauncher\UserData\Config\Config.ini`) right before every launch — enabling
-`autoLogin`, `autoRun` (start the game with no manual *Start* click), `quitWithGame` and `showAfterGameQuit=0`
-(do not reappear after the game exits) — and then tracks the **game** process rather than the thin launcher
-shim (which exits within a second of spawning the game). Because HTGame.exe only appears after a UAC prompt
-and a 30–120 s auto-login, the plugin reports **game running** for that whole start-up window (bridging the
-gap where the shim has exited but the game has not yet spawned), so Collapse stays minimized and the button
-matches the other plugins instead of flipping back to *Start*. This alone removes the extra click and the post-exit
-re-popup. Fully hiding the launcher window during the ~1-minute auto-login start-up additionally requires
-Collapse to run **as administrator**: `NTEGame.exe` is force-elevated, so a non-elevated host is blocked by
-Windows UIPI from touching its window. When elevated, the window is hidden during start-up and revealed only
-if the log reports that an interactive login is needed (first run / expired token) or after a safety timeout.
+The per-game specifics differ:
 
-**Known issue — the button can stay on *game running* for a while after you quit.** NTE's vendor launcher
+* **NTE** (UE5, `HTGame.exe`). The launcher is fetched from its self-update manifest
+  (`.../publish_ob/launcher/Version.ini` → `AllFiles.xml`) and inflated into `NTELauncher\` (~670 individually
+  zip-compressed files, ≈237 MB; zero-length entries carry a bogus placeholder checksum and are validated by
+  emptiness instead of MD5); launch runs `NTELauncher\NTELauncher.exe` with the working directory set to the
+  install root, exactly like the official 异环 shortcut. A finished install needs both `HTGameBase.dll` and
+  `NTELauncher.exe`. NTE's launcher auto-starts the game from its own settings, so no extra launch flag is
+  needed.
+* **P5X** (Unity IL2CPP, `client\pc\P5X.exe`). The plugin launches `P5XLaunch\P5XGame.exe` directly with
+  `/launcher /directly /autoplay`. The `/autoplay` flag is essential — P5X's launcher gates auto-play off
+  *server-side* (`canAutoPlay=false`), so patching the INI alone is not enough and it would otherwise stop at
+  the "开始游戏" button. A finished install needs both `GameAssembly.dll` and `P5XGame.exe`.
+
+**Known issue (NTE) — the button can stay on *game running* for a while after you quit.** NTE's vendor launcher
 owns the game process's lifetime: when you close the game it does **not** terminate `HTGame.exe` right away —
 it leaves the process running idle (with no window) and only reaps it some time later. This appears to be a
 quirk/bug of the official launcher itself (it is very slow to close the game process). Because the plugin
