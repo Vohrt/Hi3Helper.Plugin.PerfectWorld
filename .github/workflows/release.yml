@@ -1,15 +1,27 @@
 name: Release Plugin
 
-# Builds the NTE plugin, runs the Indexer to produce the Collapse release
-# bundle (per-file Brotli `.br` entries + manifest.json, packed into
-# `NTE_<version>_API-<standard>_<yyyyMMdd>.zip`), publishes that zip plus the
-# raw manifest.json + NTE.dll onto a GitHub Release, and pushes the auto-update
-# files (manifest.json + NTE.dll) into the per-plugin `NTE/` folder on the
+# Builds the selected game plugin(s), runs the Indexer to produce the Collapse
+# release bundle (per-file Brotli `.br` entries + manifest.json, packed into
+# `<GAME>_<version>_API-<standard>_<yyyyMMdd>.zip`), publishes that zip plus the
+# raw manifest.json + <GAME>.dll onto a GitHub Release, and pushes the auto-update
+# files (manifest.json + <GAME>.dll) into the per-plugin `<GAME>/` folder on the
 # `release` branch that the in-launcher self-updater reads from.
-# Trigger it manually from the Actions tab.
+#
+# The `game` input selects which plugin(s) to release: a single game, or `all`
+# to build and publish every supported game in one run. Trigger it manually
+# from the Actions tab.
 on:
   workflow_dispatch:
     inputs:
+      game:
+        description: 'Which game plugin(s) to release'
+        required: true
+        type: choice
+        options:
+          - all
+          - NTE
+          - P5X
+        default: all
       version:
         description: 'Plugin version (e.g. 1.0.0)'
         required: true
@@ -32,12 +44,41 @@ on:
         type: boolean
         default: false
 
+# Serialize runs so parallel invocations never race on the shared `release` branch.
+concurrency:
+  group: release-cdn-branch
+  cancel-in-progress: false
+
 permissions:
   contents: write
 
 jobs:
+  # Expand the `game` input into a build matrix: one entry per selected game.
+  setup:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.matrix.outputs.matrix }}
+    steps:
+      - name: Resolve game matrix
+        id: matrix
+        shell: bash
+        run: |
+          case "${{ github.event.inputs.game }}" in
+            all) echo 'matrix={"game":["NTE","P5X"]}' >> "$GITHUB_OUTPUT" ;;
+            NTE) echo 'matrix={"game":["NTE"]}' >> "$GITHUB_OUTPUT" ;;
+            P5X) echo 'matrix={"game":["P5X"]}' >> "$GITHUB_OUTPUT" ;;
+            *) echo "::error::Unknown game '${{ github.event.inputs.game }}'"; exit 1 ;;
+          esac
+
   release:
+    needs: setup
     runs-on: windows-latest
+    # max-parallel: 1 keeps the per-game legs sequential so each one clones the
+    # `release` branch after the previous leg has pushed its folder — no push race.
+    strategy:
+      max-parallel: 1
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.setup.outputs.matrix) }}
     steps:
       - name: Checkout code (with submodules)
         uses: actions/checkout@v4
@@ -77,7 +118,7 @@ jobs:
         # Without it the publish silently falls back to a plain self-contained
         # build and the Indexer rejects the (non-native) plugin DLL.
         run: >
-          dotnet publish Hi3Helper.Plugin.NTE/Hi3Helper.Plugin.NTE.csproj
+          dotnet publish Hi3Helper.Plugin.${{ matrix.game }}/Hi3Helper.Plugin.${{ matrix.game }}.csproj
           --configuration ${{ steps.cfg.outputs.configuration }}
           --runtime win-x64
           /p:PublishProfile=${{ github.event.inputs.publish_profile }}
@@ -97,14 +138,14 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: NTE@v${{ github.event.inputs.version }}
-          name: NTE v${{ github.event.inputs.version }}
+          tag_name: ${{ matrix.game }}@v${{ github.event.inputs.version }}
+          name: ${{ matrix.game }} v${{ github.event.inputs.version }}
           generate_release_notes: true
           prerelease: ${{ github.event.inputs.prerelease }}
           files: |
             ./publish_output/*.zip
             ./publish_output/manifest.json
-            ./publish_output/NTE.dll
+            ./publish_output/${{ matrix.game }}.dll
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -116,7 +157,7 @@ jobs:
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          SHORT: NTE
+          SHORT: ${{ matrix.game }}
           CDN_BRANCH: release
         run: |
           set -euo pipefail
