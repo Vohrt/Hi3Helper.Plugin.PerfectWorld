@@ -491,10 +491,10 @@ public sealed partial class PerfectWorldGameLauncher
         {
             if (!revealed)
             {
-                var needLogin = LauncherReportsLoginNeeded(launcherDir, launcherLogStartLength, config);
+                var needReveal = LauncherNeedsReveal(launcherDir, launcherLogStartLength, config);
                 var timedOut = (DateTime.UtcNow - start).TotalSeconds > revealTimeoutSeconds;
 
-                if (needLogin || timedOut)
+                if (needReveal || timedOut)
                 {
                     revealed = true;
                     SetLauncherWindowsVisible(launcherDir, baseNames, true);
@@ -557,33 +557,77 @@ public sealed partial class PerfectWorldGameLauncher
     }
 
     /// <summary>
-    ///     Shows or hides the main window of every launcher-tree process. The game binary is never in the tree list,
-    ///     so this cannot hide the game itself.
+    ///     Shows or hides every top-level window owned by the launcher-tree processes. The game binary is never in the
+    ///     tree list, so this cannot hide the game itself.
     /// </summary>
-    private static void SetLauncherWindowsVisible(string launcherDir, string[] baseNames, bool visible)
+    /// <remarks>
+    ///     Windows are located by enumerating all top-level windows (<see cref="NativeMethods.EnumWindows"/>) and
+    ///     matching their owning process id against the launcher tree — deliberately NOT via
+    ///     <see cref="Process.MainWindowHandle"/>. <c>MainWindowHandle</c> only ever returns a window that is currently
+    ///     <em>visible</em>: once a window has been hidden with <c>SW_HIDE</c> it reports <c>0</c>, which would make
+    ///     revealing an already-hidden window (e.g. a launcher conflict dialog) impossible and deadlock the silent
+    ///     launch forever. <c>EnumWindows</c> still finds hidden windows, so the reveal path always works.
+    /// </remarks>
+    private static unsafe void SetLauncherWindowsVisible(string launcherDir, string[] baseNames, bool visible)
     {
+        var pids = new HashSet<uint>();
         ForEachLauncherProcess(launcherDir, baseNames, p =>
         {
-            try
-            {
-                p.Refresh();
-                nint handle = p.MainWindowHandle;
-                if (handle == 0) return;
-
-                if (visible)
-                    NativeMethods.ShowWindow(handle, NativeMethods.SW_SHOW);
-                else if (NativeMethods.IsWindowVisible(handle))
-                    NativeMethods.ShowWindow(handle, NativeMethods.SW_HIDE);
-            }
-            catch { /* window may not exist yet */ }
+            try { pids.Add((uint)p.Id); }
+            catch { /* process already gone */ }
         });
+        if (pids.Count == 0) return;
+
+        var context = new WindowVisibilityContext(pids, visible);
+        var contextHandle = GCHandle.Alloc(context);
+        try
+        {
+            NativeMethods.EnumWindows(&SetWindowVisibilityCallback, GCHandle.ToIntPtr(contextHandle));
+        }
+        catch { /* best-effort */ }
+        finally
+        {
+            contextHandle.Free();
+        }
+    }
+
+    /// <summary>State handed to <see cref="SetWindowVisibilityCallback"/> through the <c>EnumWindows</c> lParam.</summary>
+    private sealed record WindowVisibilityContext(HashSet<uint> Pids, bool Visible);
+
+    /// <summary>
+    ///     <c>EnumWindows</c> callback: shows or hides the enumerated window when it belongs to one of the launcher
+    ///     process ids. Must never let an exception escape into the native caller.
+    /// </summary>
+    [UnmanagedCallersOnly]
+    private static int SetWindowVisibilityCallback(nint hWnd, nint lParam)
+    {
+        try
+        {
+            if (GCHandle.FromIntPtr(lParam).Target is not WindowVisibilityContext context)
+                return 1;
+
+            _ = NativeMethods.GetWindowThreadProcessId(hWnd, out uint windowPid);
+            if (!context.Pids.Contains(windowPid))
+                return 1;
+
+            if (context.Visible)
+                NativeMethods.ShowWindow(hWnd, NativeMethods.SW_SHOW);
+            else if (NativeMethods.IsWindowVisible(hWnd))
+                NativeMethods.ShowWindow(hWnd, NativeMethods.SW_HIDE);
+        }
+        catch { /* swallow: an exception must not cross the native boundary */ }
+
+        return 1; // keep enumerating
     }
 
     /// <summary>
-    ///     Tails the launcher's log (from the offset captured just before launch) for markers that indicate the
-    ///     cached-token auto-login failed and an interactive login is required.
+    ///     Tails the launcher's log (from the offset captured just before launch) for markers that mean the hidden
+    ///     launcher window must be revealed: either the cached-token auto-login failed and an interactive login is
+    ///     required (<see cref="PerfectWorldGameConfig.LoginNeededLogMarkers"/>), or the launcher raised a modal dialog
+    ///     that blocks the launch and needs the user, e.g. a software-conflict warning
+    ///     (<see cref="PerfectWorldGameConfig.LauncherAttentionLogMarkers"/>).
     /// </summary>
-    private static bool LauncherReportsLoginNeeded(string launcherDir, long launcherLogStartLength,
+    private static bool LauncherNeedsReveal(string launcherDir, long launcherLogStartLength,
         PerfectWorldGameConfig config)
     {
         try
@@ -599,6 +643,12 @@ public sealed partial class PerfectWorldGameLauncher
             var text = reader.ReadToEnd();
 
             foreach (var marker in config.LoginNeededLogMarkers)
+            {
+                if (!string.IsNullOrEmpty(marker) && text.Contains(marker, StringComparison.Ordinal))
+                    return true;
+            }
+
+            foreach (var marker in config.LauncherAttentionLogMarkers)
             {
                 if (!string.IsNullOrEmpty(marker) && text.Contains(marker, StringComparison.Ordinal))
                     return true;
@@ -762,5 +812,12 @@ public sealed partial class PerfectWorldGameLauncher
         [LibraryImport("user32.dll")]
         [return: MarshalAs(UnmanagedType.Bool)]
         internal static partial bool IsWindowVisible(nint hWnd);
+
+        [LibraryImport("user32.dll")]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        internal static unsafe partial bool EnumWindows(delegate* unmanaged<nint, nint, int> lpEnumFunc, nint lParam);
+
+        [LibraryImport("user32.dll")]
+        internal static partial uint GetWindowThreadProcessId(nint hWnd, out uint lpdwProcessId);
     }
 }

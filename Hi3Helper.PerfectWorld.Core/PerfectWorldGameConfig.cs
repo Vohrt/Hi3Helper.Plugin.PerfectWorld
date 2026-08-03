@@ -117,6 +117,18 @@ public sealed class PerfectWorldGameConfig
         ["onAutoLoginFailed", "onAutoLoginTimeOut", "autoLoginTokenError", "needLoginFirst"];
 
     /// <summary>
+    ///     Substrings that, when found in the launcher log during a silent launch, indicate the launcher raised a
+    ///     modal dialog that blocks the launch and needs the user (e.g. the pw_sdk hardware/software-conflict warning
+    ///     such as the MSI Afterburner / RTSS prompt, logged as <c>GameCustomMessageBoxController::showMessageBox</c>
+    ///     followed by <c>GameClientAgent::onLaunchGame ... has conflict, skip</c>). Detecting one reveals the hidden
+    ///     launcher window immediately so the user can dismiss the dialog, instead of waiting the full
+    ///     <see cref="LauncherStartupRevealTimeoutSeconds"/>. The defaults are shared pw_sdk log strings; a game may
+    ///     override them. Used only during a silent launch.
+    /// </summary>
+    public string[] LauncherAttentionLogMarkers { get; init; } =
+        ["has conflict", "showMessageBox"];
+
+    /// <summary>
     ///     INI section header (including brackets) inside <see cref="LauncherSettingsIniRelativePath"/> under which
     ///     the silent-launch keys live, e.g. <c>[Setting]</c>.
     /// </summary>
