@@ -4,8 +4,8 @@ name: Release Plugin
 # release bundle (per-file Brotli `.br` entries + manifest.json, packed into
 # `<GAME>_<version>_API-<standard>_<yyyyMMdd>.zip`), publishes that zip plus the
 # raw manifest.json + <GAME>.dll onto a GitHub Release, and pushes the auto-update
-# files (manifest.json + <GAME>.dll) into the per-plugin `<GAME>/` folder on the
-# `release` branch that the in-launcher self-updater reads from.
+# files (manifest.json + every asset it references) into the per-plugin `<GAME>/`
+# folder on the `release` branch that the in-launcher self-updater reads from.
 #
 # The `game` input selects which plugin(s) to release: a single game, or `all`
 # to build and publish every supported game in one run. Trigger it manually
@@ -149,10 +149,44 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      # The in-launcher self-updater (SelfUpdate.cs) reads manifest.json and the plugin
-      # DLL from the per-plugin folder on the `release` branch, served via
-      # raw.githubusercontent.com. Publish those two files there so update checks work.
-      # Uses the built-in GITHUB_TOKEN (same-repo push) — no extra secret required.
+      # Stage manifest.json plus EVERY asset the manifest references, mirroring
+      # publish_output's directory layout under ./cdn-stage. The launcher's managed
+      # self-updater downloads *all* assets listed in manifest.json, so the CDN
+      # branch must host every one of them. If any asset is missing (404), the whole
+      # update aborts and the plugin can never move past its current version, which
+      # shows up as an endless "update available -> restart -> still outdated" loop.
+      - name: Stage auto-update CDN files (manifest + all referenced assets)
+        shell: pwsh
+        run: |
+          $src   = "publish_output"
+          $stage = "cdn-stage"
+          if (Test-Path $stage) { Remove-Item $stage -Recurse -Force }
+          New-Item -ItemType Directory -Force -Path $stage | Out-Null
+
+          $manifestPath = Join-Path $src "manifest.json"
+          if (-not (Test-Path -LiteralPath $manifestPath)) {
+            Write-Error "manifest.json not found in $src"; exit 1
+          }
+          Copy-Item -LiteralPath $manifestPath -Destination (Join-Path $stage "manifest.json") -Force
+
+          $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
+          foreach ($asset in $manifest.Assets) {
+            $rel  = $asset.FilePath
+            $from = Join-Path $src   $rel
+            $to   = Join-Path $stage $rel
+            if (-not (Test-Path -LiteralPath $from)) {
+              Write-Error "Manifest asset missing from publish output: $rel"; exit 1
+            }
+            New-Item -ItemType Directory -Force -Path (Split-Path -Path $to -Parent) | Out-Null
+            Copy-Item -LiteralPath $from -Destination $to -Force
+          }
+          Write-Host "Staged manifest.json + $($manifest.Assets.Count) assets into $stage"
+
+      # The in-launcher self-updater (SelfUpdate.cs) reads manifest.json and all the
+      # assets it lists from the per-plugin folder on the `release` branch, served via
+      # raw.githubusercontent.com. Publish the complete staged set there so the managed
+      # update can download every asset. Uses the built-in GITHUB_TOKEN (same-repo
+      # push) — no extra secret required.
       - name: Publish auto-update files to the release CDN branch
         shell: bash
         env:
@@ -162,12 +196,12 @@ jobs:
         run: |
           set -euo pipefail
 
-          SRC="publish_output"
+          STAGE="cdn-stage"
           WORKDIR="cdn-branch"
           REMOTE="https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
 
-          if [ ! -f "${SRC}/manifest.json" ] || [ ! -f "${SRC}/${SHORT}.dll" ]; then
-            echo "::error::Expected ${SRC}/manifest.json and ${SRC}/${SHORT}.dll to exist"
+          if [ ! -f "${STAGE}/manifest.json" ]; then
+            echo "::error::${STAGE}/manifest.json not found (the staging step must run first)"
             exit 1
           fi
 
@@ -183,13 +217,15 @@ jobs:
             git -C "${WORKDIR}" rm -rf . >/dev/null 2>&1 || true
           fi
 
-          # Keep every published file byte-exact; the updater verifies the DLL's MD5 hash.
+          # Keep every published file byte-exact; the updater verifies each asset's MD5 hash.
           git -C "${WORKDIR}" config core.autocrlf false
           printf '* -text\n' > "${WORKDIR}/.gitattributes"
 
+          # Replace the game's folder wholesale so assets removed between versions don't
+          # linger on the CDN and drift out of sync with the manifest.
+          rm -rf "${WORKDIR:?}/${SHORT}"
           mkdir -p "${WORKDIR}/${SHORT}"
-          cp "${SRC}/manifest.json" "${WORKDIR}/${SHORT}/manifest.json"
-          cp "${SRC}/${SHORT}.dll"  "${WORKDIR}/${SHORT}/${SHORT}.dll"
+          cp -R "${STAGE}/." "${WORKDIR}/${SHORT}/"
 
           git -C "${WORKDIR}" add -A
           if git -C "${WORKDIR}" diff --cached --quiet; then
