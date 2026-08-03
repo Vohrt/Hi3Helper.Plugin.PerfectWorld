@@ -106,8 +106,13 @@ jobs:
             'Debug*'               { 'Debug' }
             default                { 'Release' }
           }
-          "configuration=$cfg" >> $env:GITHUB_OUTPUT
-          Write-Host "publish_profile=$publishProfile -> configuration=$cfg"
+          # Mirror CompileAOTAndShip.bat's _isRemoveSymbol: strip debug symbols for
+          # every profile except the Debug ones. Stripping keeps the auto-update
+          # bundle small - the NativeAOT PDB alone is ~34 MB per game.
+          $removeSymbols = if ($publishProfile -like 'Debug*') { 'false' } else { 'true' }
+          "configuration=$cfg"            >> $env:GITHUB_OUTPUT
+          "remove_symbols=$removeSymbols" >> $env:GITHUB_OUTPUT
+          Write-Host "publish_profile=$publishProfile -> configuration=$cfg, remove_symbols=$removeSymbols"
 
       - name: Restore
         run: dotnet restore Hi3Helper.Plugin.PerfectWorld.slnx --runtime win-x64
@@ -124,6 +129,27 @@ jobs:
           /p:PublishProfile=${{ github.event.inputs.publish_profile }}
           /p:Version=${{ github.event.inputs.version }}
           -o ./publish_output
+
+      # Mirror CompileAOTAndShip.bat's :RemovePDBIfNotDebug step: drop the PDBs from
+      # the publish output before indexing so they never enter manifest.json, the
+      # release zip, or the auto-update CDN branch. The launcher's self-updater would
+      # otherwise have to download the ~34 MB NativeAOT PDB on every update. Skipped
+      # for Debug profiles so debug builds keep their symbols.
+      - name: Strip debug symbols (non-Debug profiles)
+        if: steps.cfg.outputs.remove_symbols == 'true'
+        shell: pwsh
+        run: |
+          $pdbs = @(Get-ChildItem ./publish_output -Recurse -File -Filter *.pdb)
+          if ($pdbs.Count -eq 0) {
+            Write-Host "No PDB files found in publish output."
+          }
+          else {
+            foreach ($pdb in $pdbs) {
+              Write-Host "Removing $($pdb.FullName)"
+              Remove-Item -LiteralPath $pdb.FullName -Force
+            }
+            Write-Host "Removed $($pdbs.Count) PDB file(s) before indexing."
+          }
 
       # Indexer.exe (committed at the repo root) reads the published plugin,
       # writes manifest.json, Brotli-compresses every asset and packs the
