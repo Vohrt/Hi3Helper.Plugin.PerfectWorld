@@ -76,11 +76,12 @@ public partial class P5xCnPresetConfig : PluginPresetConfigBase
 
     private static readonly PerfectWorldNewsConfig P5xNewsConfig = new()
     {
-        NewsPageUrl         = "https://p5x.wanmei.com/",
+        NewsPageUrl         = "https://p5x.wanmei.com/launcher/launcher_platform.html",
         NewsLinkBaseUrl     = "https://p5x.wanmei.com",
         BannerJsUrl         = "https://static.games.wanmei.com/public/commonData/gamesData/gameSwiper/p5x-gameSwiper.js",
         BannerJsCarouselKey = "PC_Launcher",
-        Referer             = "https://p5x.wanmei.com/"
+        Referer             = "https://p5x.wanmei.com/",
+        Layout              = PerfectWorldNewsLayout.BdNewsShareBox
     };
 
     [field: AllowNull] [field: MaybeNull] public override string GameName => field ??= "Persona 5: The Phantom X";

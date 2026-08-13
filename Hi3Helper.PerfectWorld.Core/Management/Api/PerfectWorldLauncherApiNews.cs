@@ -21,11 +21,20 @@ namespace Hi3Helper.PerfectWorld.Core.Management.Api;
 ///     News / carousel / social-media provider for Perfect World launcher pages.
 ///     <para>
 ///         pw_sdk titles have no JSON launcher-content API; instead the official web launcher page embeds
-///         everything as HTML plus a small companion JS document for the banner carousel:
+///         everything as HTML plus a small companion JS document for the banner carousel. The HTML markup
+///         differs per title, so <see cref="PerfectWorldNewsConfig.Layout"/> selects the dialect:
 ///         <list type="bullet">
-///             <item>News: three <c>&lt;div class="news-cont"&gt;</c> blocks (Info / Notice / Event).</item>
-///             <item>Social media: a <c>&lt;ul class="ewm-list"&gt;</c> sidebar of <c>icon-*</c> entries with QR images.</item>
-///             <item>Carousel: <c>var yh_data_data = { "lb1": [...] }</c> exposing each banner's image + link.</item>
+///             <item>
+///                 <see cref="PerfectWorldNewsLayout.NewsContEwmList"/> (异环 / NTE): three
+///                 <c>&lt;div class="news-cont"&gt;</c> news blocks + a <c>&lt;ul class="ewm-list"&gt;</c>
+///                 social sidebar of <c>icon-*</c> entries.
+///             </item>
+///             <item>
+///                 <see cref="PerfectWorldNewsLayout.BdNewsShareBox"/> (P5X): one
+///                 <c>&lt;div class="bd news"&gt;</c> holding three <c>&lt;ul&gt;</c> news blocks + a
+///                 <c>&lt;div class="share-box"&gt;</c> of <c>share-icon-*</c> social entries.
+///             </item>
+///             <item>Carousel: <c>var *_data_data = { "&lt;key&gt;": [...] }</c> exposing each banner's image + link.</item>
 ///         </list>
 ///         All parsing is done with source-generated regex + <see cref="JsonDocument"/> to stay
 ///         NativeAOT-safe with no third-party HTML/JSON dependencies.
@@ -198,6 +207,14 @@ public partial class PerfectWorldLauncherApiNews : LauncherApiNewsBase
 
     private List<NewsItem> ParseNews(string html)
     {
+        return _config.Layout == PerfectWorldNewsLayout.BdNewsShareBox
+            ? ParseNewsBdNews(html)
+            : ParseNewsNewsCont(html);
+    }
+
+    // 异环 / NTE: three separate <div class="news-cont"><ul> blocks (Info / Notice / Event).
+    private List<NewsItem> ParseNewsNewsCont(string html)
+    {
         var items = new List<NewsItem>();
 
         MatchCollection blocks = NewsContRegex().Matches(html);
@@ -228,7 +245,55 @@ public partial class PerfectWorldLauncherApiNews : LauncherApiNewsBase
         return items;
     }
 
+    // P5X: one <div class="bd news"> holding three <ul> blocks (Info / Notice / Event). Each item is
+    // <li><a href="URL " title="FULL TITLE"><span class="date">MM/DD</span><p>truncated</p></a></li>,
+    // so the full title lives in the title attribute and the href carries a trailing space to trim.
+    private List<NewsItem> ParseNewsBdNews(string html)
+    {
+        var items = new List<NewsItem>();
+
+        Match block = BdNewsRegex().Match(html);
+        if (!block.Success)
+        {
+            return items;
+        }
+
+        MatchCollection uls = BdNewsUlRegex().Matches(block.Groups[1].Value);
+        for (int b = 0; b < uls.Count; b++)
+        {
+            LauncherNewsEntryType type = b switch
+            {
+                0 => LauncherNewsEntryType.Info,
+                1 => LauncherNewsEntryType.Notice,
+                _ => LauncherNewsEntryType.Event
+            };
+
+            foreach (Match im in BdNewsItemRegex().Matches(uls[b].Groups[1].Value))
+            {
+                string title = WebUtility.HtmlDecode(im.Groups[2].Value).Trim();
+                if (string.IsNullOrEmpty(title))
+                {
+                    continue;
+                }
+
+                string href = WebUtility.HtmlDecode(im.Groups[1].Value).Trim();
+                string date = WebUtility.HtmlDecode(im.Groups[3].Value).Trim();
+                items.Add(new NewsItem(title, AbsolutizeUrl(href), date, type));
+            }
+        }
+
+        return items;
+    }
+
     private List<SocialItem> ParseSocial(string html)
+    {
+        return _config.Layout == PerfectWorldNewsLayout.BdNewsShareBox
+            ? ParseSocialShareBox(html)
+            : ParseSocialEwmList(html);
+    }
+
+    // 异环 / NTE: a <ul class="ewm-list"> sidebar of <li class="icon-XXX"> entries.
+    private List<SocialItem> ParseSocialEwmList(string html)
     {
         var items = new List<SocialItem>();
 
@@ -246,6 +311,44 @@ public partial class PerfectWorldLauncherApiNews : LauncherApiNewsBase
             Match   hrefMatch = EwmHrefRegex().Match(body);
             Match   imgMatch  = EwmImgRegex().Match(body);
             Match   tipMatch  = EwmTipRegex().Match(body);
+
+            string? click = hrefMatch.Success ? WebUtility.HtmlDecode(hrefMatch.Groups[1].Value).Trim() : null;
+            string? img   = imgMatch.Success ? imgMatch.Groups[1].Value.Trim() : null;
+            string? tip   = tipMatch.Success ? WebUtility.HtmlDecode(tipMatch.Groups[1].Value).Trim() : null;
+
+            items.Add(new SocialItem(key, click, img, tip));
+        }
+
+        return items;
+    }
+
+    // P5X: a <div class="share-box"><ul> of <li> entries, each carrying a <div class="share-icon share-icon-XXX">
+    // plus a float-code-box(-f|-btn) with an optional <a href>, optional QR <img>, and optional <p> tip.
+    private List<SocialItem> ParseSocialShareBox(string html)
+    {
+        var items = new List<SocialItem>();
+
+        Match box = ShareBoxRegex().Match(html);
+        if (!box.Success)
+        {
+            return items;
+        }
+
+        foreach (Match li in ShareItemRegex().Matches(box.Groups[1].Value))
+        {
+            string body = li.Groups[1].Value;
+
+            Match keyMatch = ShareKeyRegex().Match(body);
+            if (!keyMatch.Success)
+            {
+                continue;
+            }
+
+            string key = keyMatch.Groups[1].Value.Trim();
+
+            Match   hrefMatch = ShareHrefRegex().Match(body);
+            Match   imgMatch  = EwmImgRegex().Match(body);
+            Match   tipMatch  = ShareTipRegex().Match(body);
 
             string? click = hrefMatch.Success ? WebUtility.HtmlDecode(hrefMatch.Groups[1].Value).Trim() : null;
             string? img   = imgMatch.Success ? imgMatch.Groups[1].Value.Trim() : null;
@@ -345,4 +448,30 @@ public partial class PerfectWorldLauncherApiNews : LauncherApiNewsBase
 
     [GeneratedRegex(@"class=""ewm-tip"">([^<]*)<")]
     private static partial Regex EwmTipRegex();
+
+    // --- P5X (BdNewsShareBox) ---
+
+    [GeneratedRegex(@"<div class=""bd news"">(.*?)</div>", RegexOptions.Singleline)]
+    private static partial Regex BdNewsRegex();
+
+    [GeneratedRegex(@"<ul[^>]*>(.*?)</ul>", RegexOptions.Singleline)]
+    private static partial Regex BdNewsUlRegex();
+
+    [GeneratedRegex(@"<a\s+href=""([^""]+)""[^>]*title=""([^""]*)""[^>]*>\s*<span[^>]*class=""date""[^>]*>([^<]*)</span>", RegexOptions.Singleline)]
+    private static partial Regex BdNewsItemRegex();
+
+    [GeneratedRegex(@"<div class=""share-box"">\s*<ul>(.*?)</ul>", RegexOptions.Singleline)]
+    private static partial Regex ShareBoxRegex();
+
+    [GeneratedRegex(@"<li>(.*?)</li>", RegexOptions.Singleline)]
+    private static partial Regex ShareItemRegex();
+
+    [GeneratedRegex(@"share-icon-([a-zA-Z0-9]+)")]
+    private static partial Regex ShareKeyRegex();
+
+    [GeneratedRegex(@"<a\s+href=""([^""]+)""")]
+    private static partial Regex ShareHrefRegex();
+
+    [GeneratedRegex(@"<p>([^<]*)</p>", RegexOptions.Singleline)]
+    private static partial Regex ShareTipRegex();
 }

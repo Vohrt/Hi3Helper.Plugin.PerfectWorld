@@ -1,6 +1,26 @@
 namespace Hi3Helper.PerfectWorld.Core.Management.Api;
 
 /// <summary>
+///     HTML layout dialect of a Perfect World launcher news page. Different pw_sdk titles ship different
+///     markup for the same conceptual content, so the parser needs to know which structure to expect.
+/// </summary>
+public enum PerfectWorldNewsLayout
+{
+    /// <summary>
+    ///     异环 / NTE (<c>yh.wanmei.com/launcher/launcher_ob.html</c>): three
+    ///     <c>&lt;div class="news-cont"&gt;</c> blocks plus a <c>&lt;ul class="ewm-list"&gt;</c> social sidebar.
+    /// </summary>
+    NewsContEwmList,
+
+    /// <summary>
+    ///     P5X (<c>p5x.wanmei.com/launcher/launcher_platform.html</c>): a single
+    ///     <c>&lt;div class="bd news"&gt;</c> holding three <c>&lt;ul&gt;</c> blocks plus a
+    ///     <c>&lt;div class="share-box"&gt;</c> social list of <c>share-icon-*</c> entries.
+    /// </summary>
+    BdNewsShareBox
+}
+
+/// <summary>
 ///     Per-game configuration for the news / carousel / social-media provider. These endpoints live on
 ///     the publisher's marketing website (not the pw_sdk resource CDN) and are game-specific, so a thin
 ///     plugin supplies them and the core stays reusable across Perfect World titles.
@@ -33,4 +53,10 @@ public sealed class PerfectWorldNewsConfig
 
     /// <summary>Optional <c>Referer</c> header sent with every request (some CDNs require it).</summary>
     public string? Referer { get; init; }
+
+    /// <summary>
+    ///     HTML structure of <see cref="NewsPageUrl"/>. Defaults to <see cref="PerfectWorldNewsLayout.NewsContEwmList"/>
+    ///     (异环 / NTE); P5X sets <see cref="PerfectWorldNewsLayout.BdNewsShareBox"/>.
+    /// </summary>
+    public PerfectWorldNewsLayout Layout { get; init; } = PerfectWorldNewsLayout.NewsContEwmList;
 }

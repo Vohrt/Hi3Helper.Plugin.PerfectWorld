@@ -32,6 +32,11 @@ internal static class PerfectWorldSocialMediaIcons
             "hykb"   => "好游快爆",
             "tjd"    => "塔吉多",
             "kf"     => "官方客服",
+            // P5X (share-box) keys:
+            "sina"   => "官方微博",
+            "weixin" => "官方微信",
+            "bbs"    => "官方网站",
+            "pay"    => "官方充值中心",
             _        => string.IsNullOrWhiteSpace(key) ? "官方社区" : key.Trim()
         };
     }
@@ -48,6 +53,11 @@ internal static class PerfectWorldSocialMediaIcons
             "hykb"   => Hykb,
             "tjd"    => Tjd,
             "kf"     => Kf,
+            // P5X (share-box) keys reuse the shared glyphs where they overlap:
+            "sina"   => Weibo,
+            "weixin" => Wechat,
+            "bbs"    => Bbs,
+            "pay"    => Pay,
             _        => Fallback
         };
 
@@ -98,6 +108,17 @@ internal static class PerfectWorldSocialMediaIcons
     private const string Kf =
         "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 24 24\">" +
         "<path fill=\"#fff\" d=\"M12 3a8 8 0 0 0-8 8v3.5A2.5 2.5 0 0 0 6.5 17H8v-6H6.2A5.8 5.8 0 0 1 12 5.2 5.8 5.8 0 0 1 17.8 11H16v6h1.2c-.4 1.2-1.4 2-3.2 2.3v-1H10v2h4v-.1c3-.3 4.8-1.7 5.4-4.2A2.5 2.5 0 0 0 20 14.5V11a8 8 0 0 0-8-8z\"/></svg>";
+
+    private const string Bbs =
+        "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 24 24\">" +
+        "<circle cx=\"12\" cy=\"12\" r=\"9\" fill=\"#fff\"/>" +
+        "<path d=\"M3 12h18\" stroke=\"#222\" stroke-width=\"1.2\"/>" +
+        "<ellipse cx=\"12\" cy=\"12\" rx=\"4.2\" ry=\"9\" fill=\"none\" stroke=\"#222\" stroke-width=\"1.2\"/></svg>";
+
+    private const string Pay =
+        "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 24 24\">" +
+        "<circle cx=\"12\" cy=\"12\" r=\"9\" fill=\"#fff\"/>" +
+        "<path fill=\"#222\" d=\"M8.6 6.5l3.4 4.2 3.4-4.2h1.7l-3.6 4.5H17v1.2h-3.4v1.2H17v1.2h-3.4V17.5h-1.7v-2.4H8.6v-1.2h3.3v-1.2H8.6v-1.2h2.4L7.4 6.5h1.2z\"/></svg>";
 
     private const string Fallback =
         "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 24 24\">" +
