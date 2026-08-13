@@ -110,6 +110,14 @@ public sealed class PerfectWorldGameConfig
     public string LauncherLogRelativePath { get; init; } = Path.Combine("UserData", "Log", "NTEGame.log");
 
     /// <summary>
+    ///     Optional install-relative path to the vendor's proprietary <c>qres</c> resource pack from which the
+    ///     home-screen background image is extracted when the launcher CDN publishes no dynamic <c>bgimgs/</c>
+    ///     folder, e.g. <c>P5XLaunch\ResData\1264.dat</c> for P5X. Left <see langword="null"/> for games (such as
+    ///     异环/NTE) that expose a dynamic background via the launcher self-update tree, so those are unaffected.
+    /// </summary>
+    public string? LocalBackgroundResPackRelativePath { get; init; }
+
+    /// <summary>
     ///     Substrings that, when found in the launcher log, indicate that the cached-token auto-login failed and an
     ///     interactive login UI must be revealed to the user. Used only during a silent launch.
     /// </summary>

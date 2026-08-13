@@ -71,7 +71,10 @@ public partial class P5xCnPresetConfig : PluginPresetConfigBase
         // P5X-specific install layout (differs from 异环's NTELauncher/Client):
         LauncherRootDirName              = "P5XLaunch",
         ContentRootDirName               = "client",
-        LauncherLogRelativePath          = @"UserData\Log\P5XGame.log"
+        LauncherLogRelativePath          = @"UserData\Log\P5XGame.log",
+        // P5X publishes no dynamic bgimgs/ folder (unlike 异环); its home key-visual lives inside the installed
+        // vendor 'qres' resource pack. The media provider extracts the background from this pack post-install.
+        LocalBackgroundResPackRelativePath = @"P5XLaunch\ResData\1264.dat"
     };
 
     private static readonly PerfectWorldNewsConfig P5xNewsConfig = new()
@@ -131,7 +134,9 @@ public partial class P5xCnPresetConfig : PluginPresetConfigBase
 
     public override ILauncherApiMedia? LauncherApiMedia
     {
-        get => field ??= new PerfectWorldLauncherApiMedia(P5xGameConfig);
+        // Share the game manager so the media provider can locate the install directory and extract P5X's
+        // home background from the local vendor resource pack (no dynamic bgimgs on the launcher CDN).
+        get => field ??= new PerfectWorldLauncherApiMedia(P5xGameConfig, gameManager: GameManager);
         set;
     }
 
