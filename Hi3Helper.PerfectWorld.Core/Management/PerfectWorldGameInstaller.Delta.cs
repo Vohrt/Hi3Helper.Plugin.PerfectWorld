@@ -19,6 +19,9 @@ public partial class PerfectWorldGameInstaller
     private List<PerfectWorldPatchEntry>? _cachedPatches;
     private string? _cachedPatchesVersion;
 
+    /// <summary>Serialises lastdiff (re)fetches so concurrent callers don't each download+decode the same patch list.</summary>
+    private readonly SemaphoreSlim _patchManifestLock = new(1, 1);
+
     // The managed HDiffPatch applier keeps some process-wide static state and each apply can allocate large
     // buffers for multi-GB paks, so applies are serialised while downloads stay parallel.
     private readonly SemaphoreSlim _patchApplyLock = new(1, 1);
@@ -50,20 +53,32 @@ public partial class PerfectWorldGameInstaller
         if (_cachedPatches != null && _cachedPatchesVersion == remote.ResVersion)
             return _cachedPatches;
 
-        PerfectWorldGameConfig config = Manager.Config;
-        byte[] raw = await DownloadBytesWithFallbackAsync(
-            cdn => config.BuildLastDiffUrl(cdn, remote.ResVersion), token).ConfigureAwait(false);
+        await _patchManifestLock.WaitAsync(token).ConfigureAwait(false);
+        try
+        {
+            // Re-check under the lock: a concurrent caller may have populated the cache while we waited.
+            if (_cachedPatches != null && _cachedPatchesVersion == remote.ResVersion)
+                return _cachedPatches;
 
-        byte[] bin = LooksLikeZip(raw) ? ExtractZipEntry(raw, "lastdiff.bin") : raw;
-        string xml = PatcherXml0.DecodeToXml(bin, config.AppId);
-        List<PerfectWorldPatchEntry> entries = PerfectWorldManifest.ParsePatchList(xml);
+            PerfectWorldGameConfig config = Manager.Config;
+            byte[] raw = await DownloadBytesWithFallbackAsync(
+                cdn => config.BuildLastDiffUrl(cdn, remote.ResVersion), token).ConfigureAwait(false);
 
-        SharedStatic.InstanceLogger.LogInformation(
-            "[PerfectWorldInstaller] lastdiff {Version}: {Count} patch entries.", remote.ResVersion, entries.Count);
+            byte[] bin = LooksLikeZip(raw) ? ExtractZipEntry(raw, "lastdiff.bin") : raw;
+            string xml = PatcherXml0.DecodeToXml(bin, config.AppId);
+            List<PerfectWorldPatchEntry> entries = PerfectWorldManifest.ParsePatchList(xml);
 
-        _cachedPatches = entries;
-        _cachedPatchesVersion = remote.ResVersion;
-        return entries;
+            SharedStatic.InstanceLogger.LogInformation(
+                "[PerfectWorldInstaller] lastdiff {Version}: {Count} patch entries.", remote.ResVersion, entries.Count);
+
+            _cachedPatches = entries;
+            _cachedPatchesVersion = remote.ResVersion;
+            return entries;
+        }
+        finally
+        {
+            _patchManifestLock.Release();
+        }
     }
 
     /// <summary>

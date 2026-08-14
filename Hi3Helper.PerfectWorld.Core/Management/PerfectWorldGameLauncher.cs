@@ -351,7 +351,9 @@ public sealed partial class PerfectWorldGameLauncher
             --retry;
         }
 
-        if (retry <= 0) return;
+        // Give up only when the log truly never appeared. Keying this off the retry counter instead would drop the
+        // last-chance case where the file shows up on the final poll (retry == 0), leaving the game log untailed.
+        if (!File.Exists(gameLogPath)) return;
 
         var printCallback = context.PrintGameLogCallback;
 
@@ -485,25 +487,21 @@ public sealed partial class PerfectWorldGameLauncher
         int revealTimeoutSeconds, long launcherLogStartLength, PerfectWorldGameConfig config, CancellationToken token)
     {
         var start = DateTime.UtcNow;
-        var revealed = false;
 
         while (!token.IsCancellationRequested)
         {
-            if (!revealed)
-            {
-                var needReveal = LauncherNeedsReveal(launcherDir, launcherLogStartLength, config);
-                var timedOut = (DateTime.UtcNow - start).TotalSeconds > revealTimeoutSeconds;
+            var needReveal = LauncherNeedsReveal(launcherDir, launcherLogStartLength, config);
+            var timedOut = (DateTime.UtcNow - start).TotalSeconds > revealTimeoutSeconds;
 
-                if (needReveal || timedOut)
-                {
-                    revealed = true;
-                    SetLauncherWindowsVisible(launcherDir, baseNames, true);
-                }
-                else
-                {
-                    SetLauncherWindowsVisible(launcherDir, baseNames, false);
-                }
+            if (needReveal || timedOut)
+            {
+                // Reveal for an interactive login (or as a timeout fallback) and stop: revealing is terminal, so
+                // there is nothing left to hide and no reason to keep polling until the caller cancels us.
+                SetLauncherWindowsVisible(launcherDir, baseNames, true);
+                return;
             }
+
+            SetLauncherWindowsVisible(launcherDir, baseNames, false);
 
             try { await Task.Delay(300, token); }
             catch { return; }

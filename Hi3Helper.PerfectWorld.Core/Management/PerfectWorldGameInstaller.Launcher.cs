@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.IO.Compression;
 using System.Linq;
+using System.Runtime.CompilerServices;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
@@ -193,15 +194,19 @@ public partial class PerfectWorldGameInstaller
         PerfectWorldGameConfig config = Manager.Config;
         Exception? lastError = null;
 
+        // Shared across CDN attempts so a resumed partial temp file isn't credited twice on failover (see
+        // DownloadContentFileAsync for the full rationale).
+        StrongBox<long> reported = new(0);
+
         for (int cdnIndex = 0; cdnIndex < config.LauncherCdnUrls.Length; cdnIndex++)
         {
             string url = config.BuildLauncherFileZipUrl(config.LauncherCdnUrls[cdnIndex], versionDir, file.Path);
             try
             {
-                await DownloadFileAsync(url, tempPath, file.ZipSize, token, onBytes).ConfigureAwait(false);
+                await DownloadFileAsync(url, tempPath, file.ZipSize, token, onBytes, reported).ConfigureAwait(false);
                 return;
             }
-            catch (Exception ex) when (ex is not OperationCanceledException)
+            catch (Exception ex) when (!(ex is OperationCanceledException && token.IsCancellationRequested))
             {
                 lastError = ex;
                 SharedStatic.InstanceLogger.LogWarning(

@@ -1,10 +1,12 @@
 using System;
+using System.Buffers;
 using System.Collections.Generic;
 using System.IO;
 using System.IO.Compression;
 using System.Net;
 using System.Net.Http;
 using System.Net.Http.Headers;
+using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices.Marshalling;
 using System.Security.Cryptography;
 using System.Threading;
@@ -180,15 +182,21 @@ public partial class PerfectWorldGameInstaller : GameInstallerBase
         PerfectWorldGameConfig config = Manager.Config;
         Exception? lastError = null;
 
+        // Bytes already credited to onProgress for THIS temp file, shared across every CDN attempt. The partial
+        // temp file is intentionally kept between attempts to allow HTTP-range resume, so the reported-bytes
+        // accounting must persist with it. Otherwise a failover would re-credit the resumed prefix (its on-disk
+        // bytes get reported again as "resume" progress) and inflate the mid-download progress reading.
+        StrongBox<long> reported = new(0);
+
         for (int cdnIndex = 0; cdnIndex < config.GameResCdnUrls.Length; cdnIndex++)
         {
             string url = config.BuildContentUrl(config.GameResCdnUrls[cdnIndex], md5, expectedSize);
             try
             {
-                await DownloadFileAsync(url, tempPath, expectedSize, token, onProgress).ConfigureAwait(false);
+                await DownloadFileAsync(url, tempPath, expectedSize, token, onProgress, reported).ConfigureAwait(false);
                 return;
             }
-            catch (Exception ex) when (ex is not OperationCanceledException)
+            catch (Exception ex) when (!(ex is OperationCanceledException && token.IsCancellationRequested))
             {
                 lastError = ex;
                 SharedStatic.InstanceLogger.LogWarning(
@@ -202,11 +210,16 @@ public partial class PerfectWorldGameInstaller : GameInstallerBase
     /// <summary>
     ///     Downloads a single URL to <paramref name="tempPath"/> with HTTP range resume and retry.
     /// </summary>
+    /// <param name="reportedState">
+    ///     Running total of bytes already credited to <paramref name="onProgress"/> for this temp file. Pass a
+    ///     shared box across CDN failover so a resumed partial file is credited once; when <see langword="null"/>
+    ///     the accounting is local to this call.
+    /// </param>
     private async Task DownloadFileAsync(string url, string tempPath, long expectedSize, CancellationToken token,
-        Action<long> onProgress)
+        Action<long> onProgress, StrongBox<long>? reportedState = null)
     {
         const int maxRetries = 3;
-        long totalReported = 0;
+        StrongBox<long> reported = reportedState ?? new StrongBox<long>(0);
 
         for (int attempt = 1; attempt <= maxRetries; attempt++)
         {
@@ -223,11 +236,11 @@ public partial class PerfectWorldGameInstaller : GameInstallerBase
                     }
                 }
 
-                long diff = existingLength - totalReported;
+                long diff = existingLength - reported.Value;
                 if (diff != 0)
                 {
                     onProgress(diff);
-                    totalReported += diff;
+                    reported.Value += diff;
                 }
 
                 if (existingLength == expectedSize) return;
@@ -242,10 +255,10 @@ public partial class PerfectWorldGameInstaller : GameInstallerBase
                 if (existingLength > 0 && response.StatusCode != HttpStatusCode.PartialContent)
                 {
                     ForceDeleteFile(tempPath);
-                    if (totalReported > 0)
+                    if (reported.Value > 0)
                     {
-                        onProgress(-totalReported);
-                        totalReported = 0;
+                        onProgress(-reported.Value);
+                        reported.Value = 0;
                     }
                     existingLength = 0;
                 }
@@ -257,13 +270,20 @@ public partial class PerfectWorldGameInstaller : GameInstallerBase
                     existingLength > 0 ? FileMode.Append : FileMode.Create,
                     FileAccess.Write, FileShare.None, BufferSize, true);
 
-                var buffer = new byte[BufferSize];
-                int read;
-                while ((read = await stream.ReadAsync(buffer, token).ConfigureAwait(false)) > 0)
+                byte[] buffer = ArrayPool<byte>.Shared.Rent(BufferSize);
+                try
                 {
-                    await fs.WriteAsync(buffer.AsMemory(0, read), token).ConfigureAwait(false);
-                    onProgress(read);
-                    totalReported += read;
+                    int read;
+                    while ((read = await stream.ReadAsync(buffer, token).ConfigureAwait(false)) > 0)
+                    {
+                        await fs.WriteAsync(buffer.AsMemory(0, read), token).ConfigureAwait(false);
+                        onProgress(read);
+                        reported.Value += read;
+                    }
+                }
+                finally
+                {
+                    ArrayPool<byte>.Shared.Return(buffer);
                 }
 
                 await fs.FlushAsync(token).ConfigureAwait(false);
@@ -312,6 +332,9 @@ public partial class PerfectWorldGameInstaller : GameInstallerBase
     {
         _downloadHttpClient.Dispose();
         _patchApplyLock.Dispose();
+        // _manifestLock / _patchManifestLock are pure async gates that acquire no unmanaged handle (their
+        // AvailableWaitHandle is never touched), so they are deliberately left for GC. Disposing them here could
+        // race a still-releasing manifest fetch and throw ObjectDisposedException from its finally block.
         GC.SuppressFinalize(this);
     }
 }

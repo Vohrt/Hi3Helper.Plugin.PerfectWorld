@@ -1,4 +1,5 @@
 using System;
+using System.Buffers;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -146,18 +147,25 @@ public partial class PerfectWorldGameInstaller
     /// </summary>
     private static async Task CopyExactAsync(Stream source, Stream dest, long count, CancellationToken token)
     {
-        byte[] buffer = new byte[BufferSize];
-        long remaining = count;
-
-        while (remaining > 0)
+        byte[] buffer = ArrayPool<byte>.Shared.Rent(BufferSize);
+        try
         {
-            int toRead = (int)Math.Min(buffer.Length, remaining);
-            int read = await source.ReadAsync(buffer.AsMemory(0, toRead), token).ConfigureAwait(false);
-            if (read <= 0)
-                throw new EndOfStreamException("Unexpected end of pak blob while extracting.");
+            long remaining = count;
 
-            await dest.WriteAsync(buffer.AsMemory(0, read), token).ConfigureAwait(false);
-            remaining -= read;
+            while (remaining > 0)
+            {
+                int toRead = (int)Math.Min(buffer.Length, remaining);
+                int read = await source.ReadAsync(buffer.AsMemory(0, toRead), token).ConfigureAwait(false);
+                if (read <= 0)
+                    throw new EndOfStreamException("Unexpected end of pak blob while extracting.");
+
+                await dest.WriteAsync(buffer.AsMemory(0, read), token).ConfigureAwait(false);
+                remaining -= read;
+            }
+        }
+        finally
+        {
+            ArrayPool<byte>.Shared.Return(buffer);
         }
     }
 

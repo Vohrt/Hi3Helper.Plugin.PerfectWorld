@@ -118,6 +118,19 @@ public sealed class PerfectWorldGameConfig
     public string? LocalBackgroundResPackRelativePath { get; init; }
 
     /// <summary>
+    ///     Install-relative path substrings whose matching manifest content the game client downloads itself on
+    ///     demand, so the plugin must NOT fetch it at install time. For 异环/NTE this is <c>["/TagPatchPaks/"]</c>:
+    ///     the per-language voice packs (<c>pakchunk101</c> = Chinese, <c>102/103/104</c> = Japanese/English/Korean)
+    ///     live there, the official launcher ships none of them, and the UE client downloads the default (Chinese)
+    ///     voice on first launch plus any other language the player later selects in-game — matching how the
+    ///     officially supported titles defer voice. Matching is a case-insensitive substring test against the
+    ///     forward-slash manifest path. Empty (the default) downloads the entire manifest, so games without an
+    ///     on-demand channel (e.g. P5X, whose Zeus asset system already ships no voice in the pw_sdk manifest) are
+    ///     unaffected.
+    /// </summary>
+    public string[] DeferredContentPathMarkers { get; init; } = [];
+
+    /// <summary>
     ///     Substrings that, when found in the launcher log, indicate that the cached-token auto-login failed and an
     ///     interactive login UI must be revealed to the user. Used only during a silent launch.
     /// </summary>

@@ -53,7 +53,11 @@ public partial class NteCnPresetConfig : PluginPresetConfigBase
         SilentLaunch                     = true,
         LauncherSettingsIniRelativePath  = @"NTELauncher\UserData\Config\Config.ini",
         LauncherProcessBaseNames         = ["NTEGame", "NTELauncher", "NTEUpdate", "NTEBrowser", "NTEWebBooster", "NTEErrRep"],
-        LauncherStartupRevealTimeoutSeconds = 120
+        LauncherStartupRevealTimeoutSeconds = 120,
+        // 异环's UE client downloads voice on demand — the default (Chinese) on first launch and other languages
+        // when the player selects them in-game — exactly like the official launcher, which ships no TagPatchPaks.
+        // Defer that whole directory so the plugin install doesn't pull ~3-5 GB of voice the game manages itself.
+        DeferredContentPathMarkers       = ["/TagPatchPaks/"]
     };
 
     private static readonly PerfectWorldNewsConfig NteNewsConfig = new()

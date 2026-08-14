@@ -33,6 +33,18 @@ public partial class PerfectWorldGameManager : GameManagerBase
     private PerfectWorldRemoteConfig? _remoteConfig;
     private bool _isInitialized;
 
+    // Coordinates the fire-and-forget re-init started by SetGamePathInner with path changes and disposal.
+    //  * _lifetimeCts is cancelled on Dispose so no background task keeps using the (disposed) HttpClient.
+    //  * _currentInitCts supersedes the previous in-flight re-init when the game path changes again.
+    //  * _initGeneration is the atomic supersession token: a background init only commits its results while it is
+    //    still the latest generation, closing the race where a stale init overwrites a newer path's version state.
+    // All three, plus _isInitialized, are only mutated under _initSync (never held across an await).
+    private readonly object _initSync = new();
+    private readonly CancellationTokenSource _lifetimeCts = new();
+    private CancellationTokenSource? _currentInitCts;
+    private int _initGeneration;
+    private bool _disposed;
+
     public PerfectWorldGameManager(PerfectWorldGameConfig config)
     {
         _config = config;
@@ -97,7 +109,10 @@ public partial class PerfectWorldGameManager : GameManagerBase
                     _remoteConfig.ResVersion, _remoteConfig.ResSize);
                 return _remoteConfig;
             }
-            catch (Exception ex)
+            // Only a genuine caller cancellation should abort the CDN loop. An HttpClient *timeout* also surfaces as
+            // an OperationCanceledException/TaskCanceledException but with the caller's token NOT cancelled, and that
+            // must fall through to the next CDN like any other transient failure.
+            catch (Exception ex) when (!(ex is OperationCanceledException && token.IsCancellationRequested))
             {
                 SharedStatic.InstanceLogger.LogWarning("[PerfectWorldManager] Failed to fetch config.xml from {Url}: {Msg}",
                     url, ex.Message);
@@ -107,20 +122,41 @@ public partial class PerfectWorldGameManager : GameManagerBase
         return _remoteConfig;
     }
 
-    internal async Task<int> InitAsyncInner(bool forceInit, CancellationToken token)
+    internal Task<int> InitAsyncInner(bool forceInit, CancellationToken token)
+        => InitAsyncInner(forceInit, token, generation: null);
+
+    private async Task<int> InitAsyncInner(bool forceInit, CancellationToken token, int? generation)
     {
         if (!forceInit && _isInitialized) return 0;
 
-        // Local installed version.
-        string? localVersion = ReadInstalledResVersion();
-        CurrentGameVersion = string.IsNullOrEmpty(localVersion) ? GameVersion.Empty : new GameVersion(localVersion);
-
-        // Remote available version.
+        // Remote available version (the slow part; done outside any lock).
         PerfectWorldRemoteConfig? remote = await GetRemoteConfigAsync(true, token).ConfigureAwait(false);
-        if (remote != null && !string.IsNullOrEmpty(remote.ResVersion))
-            ApiGameVersion = new GameVersion(remote.ResVersion);
 
-        _isInitialized = true;
+        // Read the local installed version AFTER the fetch so a concurrent install/update that finished while the
+        // request was in flight is reflected, rather than overwritten by a stale pre-await snapshot.
+        string? localVersion = ReadInstalledResVersion();
+        GameVersion localGameVersion =
+            string.IsNullOrEmpty(localVersion) ? GameVersion.Empty : new GameVersion(localVersion);
+        GameVersion? apiGameVersion = remote != null && !string.IsNullOrEmpty(remote.ResVersion)
+            ? new GameVersion(remote.ResVersion)
+            : null;
+
+        lock (_initSync)
+        {
+            // Commit nothing if this init was superseded (a newer SetGamePath bumped the generation) or the manager
+            // was disposed/cancelled. This is the atomic point that stops a stale background init from clobbering the
+            // current path's version state. A null generation means a foreground (host-awaited) init, never superseded.
+            token.ThrowIfCancellationRequested();
+            if (generation.HasValue && generation.Value != _initGeneration)
+                throw new OperationCanceledException();
+
+            CurrentGameVersion = localGameVersion;
+            if (apiGameVersion.HasValue)
+                ApiGameVersion = apiGameVersion.Value;
+
+            _isInitialized = true;
+        }
+
         return 0;
     }
 
@@ -211,21 +247,52 @@ public partial class PerfectWorldGameManager : GameManagerBase
     protected override void SetGamePathInner(string gamePath)
     {
         CurrentGameInstallPath = gamePath;
-        _isInitialized = false;
 
-        if (string.IsNullOrEmpty(gamePath)) return;
-
-        _ = Task.Run(async () =>
+        lock (_initSync)
         {
+            _isInitialized = false;
+
+            // Supersede any previous in-flight background init: bump the generation (so a late commit is rejected)
+            // and cancel its token.
+            _initGeneration++;
+            if (_currentInitCts is { } previous)
+            {
+                try { previous.Cancel(); } catch (ObjectDisposedException) { /* already torn down */ }
+                _currentInitCts = null;
+            }
+
+            if (_disposed || string.IsNullOrEmpty(gamePath)) return;
+
+            CancellationTokenSource cts;
             try
             {
-                await InitAsyncInner(true, CancellationToken.None).ConfigureAwait(false);
+                cts = CancellationTokenSource.CreateLinkedTokenSource(_lifetimeCts.Token);
             }
-            catch (Exception ex)
+            catch (ObjectDisposedException)
             {
-                SharedStatic.InstanceLogger.LogError("[PerfectWorldManager] Re-initialization failed: {Msg}", ex.Message);
+                return; // manager already disposed; nothing to initialize
             }
-        });
+
+            _currentInitCts = cts;
+            int myGeneration = _initGeneration;
+            CancellationToken initToken = cts.Token;
+
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    await InitAsyncInner(true, initToken, myGeneration).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException)
+                {
+                    // Superseded by a newer SetGamePath, or the manager was disposed. Nothing to commit.
+                }
+                catch (Exception ex)
+                {
+                    SharedStatic.InstanceLogger.LogError("[PerfectWorldManager] Re-initialization failed: {Msg}", ex.Message);
+                }
+            }, initToken);
+        }
     }
 
     protected override void SetCurrentGameVersionInner(in GameVersion gameVersion)
@@ -244,6 +311,23 @@ public partial class PerfectWorldGameManager : GameManagerBase
 
     public override void Dispose()
     {
+        // Stop any fire-and-forget background init before tearing down the HttpClient it uses, so it cannot touch a
+        // disposed client. The per-call linked sources are intentionally left for GC rather than disposed here,
+        // because the background task may still hold their tokens; they carry no unmanaged handles.
+        lock (_initSync)
+        {
+            _disposed = true;
+            _initGeneration++;
+            if (_currentInitCts is { } current)
+            {
+                try { current.Cancel(); } catch (ObjectDisposedException) { /* already torn down */ }
+                _currentInitCts = null;
+            }
+        }
+
+        try { _lifetimeCts.Cancel(); } catch (ObjectDisposedException) { /* already disposed */ }
+        _lifetimeCts.Dispose();
+
         base.Dispose();
         ApiResponseHttpClient?.Dispose();
     }

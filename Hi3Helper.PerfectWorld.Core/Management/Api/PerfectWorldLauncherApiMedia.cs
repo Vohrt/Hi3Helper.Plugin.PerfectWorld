@@ -27,11 +27,13 @@ namespace Hi3Helper.PerfectWorld.Core.Management.Api;
 ///         Each asset URL is <c>{dir(FileListURL)}{File.Path}.zip</c>.
 ///     </para>
 ///     <para>
-///         Collapse decides image-vs-video by the served path's file extension and opens local files
-///         directly, so this provider downloads + unzips the chosen assets into a local cache during
-///         <see cref="InitAsync"/> and serves absolute local <c>.jpg</c>/<c>.mp4</c> paths. Index 0 is the
-///         static image (an always-visible default); when available the video is offered at index 1 and is
-///         user-switchable via Collapse's background switcher.
+///         Collapse decides image-vs-video by the served path's file extension, opens local files directly,
+///         and shows the entry at index 0 by default (a background switcher exposes the rest). So this
+///         provider downloads + unzips the chosen assets into a local cache during <see cref="InitAsync"/>
+///         and serves absolute local <c>.jpg</c>/<c>.mp4</c> paths: when a video is available it is placed at
+///         index 0 so the Home background animates by default (matching the official launcher), with the
+///         static image kept at index 1 as a user-switchable fallback (also the manual escape when the host
+///         cannot decode the video). When no video exists, the static image is the sole entry at index 0.
 ///     </para>
 /// </summary>
 [GeneratedComClass]
@@ -269,12 +271,14 @@ public partial class PerfectWorldLauncherApiMedia : LauncherApiMediaBase
     {
         TryUseCachedLocalBackgroundImage();
 
-        // Order matters: index 0 is the static image (reliable default shown on Home), index 1 is the
-        // switchable video. Collapse classifies each entry by its path's file extension.
+        // Order matters: Collapse shows the entry at index 0 by default and classifies each entry by its
+        // path's file extension. Put the video first so the Home background is animated by default (like the
+        // official launcher); keep the static image at index 1 as a switchable fallback (also the manual
+        // escape when the host lacks a video codec). With no video, the image is the sole index-0 entry.
         string[] paths = new string[2];
         int total = 0;
-        if (!string.IsNullOrEmpty(_backgroundImagePath)) paths[total++] = _backgroundImagePath!;
         if (!string.IsNullOrEmpty(_backgroundVideoPath)) paths[total++] = _backgroundVideoPath!;
+        if (!string.IsNullOrEmpty(_backgroundImagePath)) paths[total++] = _backgroundImagePath!;
 
         if (total == 0)
         {

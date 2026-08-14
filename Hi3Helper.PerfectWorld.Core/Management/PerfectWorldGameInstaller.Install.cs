@@ -30,6 +30,9 @@ public partial class PerfectWorldGameInstaller
     private ManifestBundle? _cachedManifest;
     private string? _cachedManifestVersion;
 
+    /// <summary>Serialises manifest (re)fetches so concurrent callers don't each download+decode the same bundle.</summary>
+    private readonly SemaphoreSlim _manifestLock = new(1, 1);
+
     private readonly Lock _reportLock = new();
     private InstallProgress _progress;
     private long _lastReportTick;
@@ -45,29 +48,98 @@ public partial class PerfectWorldGameInstaller
         if (remote == null || string.IsNullOrEmpty(remote.ResVersion))
             throw new IOException("Unable to obtain remote config.xml for manifest.");
 
-        if (!forceRefresh && _cachedManifest != null && _cachedManifestVersion == remote.ResVersion)
-            return _cachedManifest;
+        // Fast path: return the published cache without taking the lock when it already matches.
+        if (!forceRefresh && _cachedManifest is { } fast && _cachedManifestVersion == remote.ResVersion)
+            return fast;
 
-        PerfectWorldGameConfig config = Manager.Config;
-        byte[] zipBytes = await DownloadBytesWithFallbackAsync(
-            cdn => config.BuildResListZipUrl(cdn, remote.ResVersion), token).ConfigureAwait(false);
+        await _manifestLock.WaitAsync(token).ConfigureAwait(false);
+        try
+        {
+            // Re-check under the lock: a concurrent caller may have populated the cache while we waited.
+            if (!forceRefresh && _cachedManifest is { } cached && _cachedManifestVersion == remote.ResVersion)
+                return cached;
 
-        byte[] resListBin = ExtractZipEntry(zipBytes, "ResList.bin");
-        string xml = PatcherXml0.DecodeToXml(resListBin, config.AppId);
-        List<PerfectWorldResEntry> files = PerfectWorldManifest.ParseResList(xml);
-        List<PerfectWorldPakEntry> paks = PerfectWorldManifest.ParsePackages(xml);
+            PerfectWorldGameConfig config = Manager.Config;
+            byte[] zipBytes = await DownloadBytesWithFallbackAsync(
+                cdn => config.BuildResListZipUrl(cdn, remote.ResVersion), token).ConfigureAwait(false);
 
-        long packedCount = 0;
-        foreach (PerfectWorldPakEntry pak in paks) packedCount += pak.Files.Count;
+            byte[] resListBin = ExtractZipEntry(zipBytes, "ResList.bin");
+            string xml = PatcherXml0.DecodeToXml(resListBin, config.AppId);
+            List<PerfectWorldResEntry> files = PerfectWorldManifest.ParseResList(xml);
+            List<PerfectWorldPakEntry> paks = PerfectWorldManifest.ParsePackages(xml);
 
-        SharedStatic.InstanceLogger.LogInformation(
-            "[PerfectWorldInstaller] Manifest {Version}: {Res} direct files + {Paks} paks ({Packed} packed files) = {Total} total.",
-            remote.ResVersion, files.Count, paks.Count, packedCount, files.Count + packedCount);
+            // Drop content the game client fetches on demand (configured per game via DeferredContentPathMarkers). For
+            // 异环/NTE this removes the per-language voice packs under Content/TagPatchPaks/, mirroring the official
+            // launcher: it ships only the base game and the UE client downloads the default (Chinese) voice on first
+            // launch plus any language the player later selects. Filtering here keeps the size query, install and update
+            // paths mutually consistent because all of them read the manifest exclusively through this (cached) method.
+            ManifestBundle bundle = ApplyDeferredContentFilter(files, paks, config.DeferredContentPathMarkers);
 
-        var bundle = new ManifestBundle(files, paks);
-        _cachedManifest = bundle;
-        _cachedManifestVersion = remote.ResVersion;
-        return bundle;
+            long packedCount = 0;
+            foreach (PerfectWorldPakEntry pak in bundle.Paks) packedCount += pak.Files.Count;
+
+            SharedStatic.InstanceLogger.LogInformation(
+                "[PerfectWorldInstaller] Manifest {Version}: {Res} direct files + {Paks} paks ({Packed} packed files) = {Total} total.",
+                remote.ResVersion, bundle.Files.Count, bundle.Paks.Count, packedCount, bundle.Files.Count + packedCount);
+
+            _cachedManifest = bundle;
+            _cachedManifestVersion = remote.ResVersion;
+            return bundle;
+        }
+        finally
+        {
+            _manifestLock.Release();
+        }
+    }
+
+    /// <summary>
+    ///     Removes manifest content the game client itself downloads on demand, so the plugin does not fetch it at
+    ///     install time. Driven by <see cref="PerfectWorldGameConfig.DeferredContentPathMarkers"/>: for 异环/NTE it
+    ///     drops the per-language voice packs under <c>Content/TagPatchPaks/</c> (the official launcher likewise
+    ///     ships none, and the UE client pulls the selected language — Chinese by default — on first launch). A
+    ///     directly-addressed <c>&lt;Res&gt;</c> file is dropped when its path matches a marker; a packed
+    ///     <c>&lt;Pak&gt;</c> archive is dropped only when <em>every</em> file it bundles matches, because a pak
+    ///     blob is downloaded whole and sliced, so a pak mixing deferred and required entries must be kept.
+    /// </summary>
+    private static ManifestBundle ApplyDeferredContentFilter(List<PerfectWorldResEntry> files,
+        List<PerfectWorldPakEntry> paks, string[] markers)
+    {
+        if (markers.Length == 0)
+            return new ManifestBundle(files, paks);
+
+        bool IsDeferred(string path)
+        {
+            foreach (string marker in markers)
+                if (path.Contains(marker, StringComparison.OrdinalIgnoreCase))
+                    return true;
+            return false;
+        }
+
+        var keptFiles = new List<PerfectWorldResEntry>(files.Count);
+        long deferredBytes = 0;
+        foreach (PerfectWorldResEntry entry in files)
+        {
+            if (IsDeferred(entry.Filename)) deferredBytes += entry.FileSize;
+            else keptFiles.Add(entry);
+        }
+
+        var keptPaks = new List<PerfectWorldPakEntry>(paks.Count);
+        foreach (PerfectWorldPakEntry pak in paks)
+        {
+            if (pak.Files.Count > 0 && pak.Files.All(f => IsDeferred(f.Filename)))
+                deferredBytes += pak.FileSize;
+            else
+                keptPaks.Add(pak);
+        }
+
+        int droppedFiles = files.Count - keptFiles.Count;
+        int droppedPaks = paks.Count - keptPaks.Count;
+        if (droppedFiles > 0 || droppedPaks > 0)
+            SharedStatic.InstanceLogger.LogInformation(
+                "[PerfectWorldInstaller] Deferred {GB:0.00} GB of on-demand content ({Files} files + {Paks} paks) the game downloads itself (e.g. per-language voice).",
+                deferredBytes / (1024.0 * 1024 * 1024), droppedFiles, droppedPaks);
+
+        return new ManifestBundle(keptFiles, keptPaks);
     }
 
     /// <summary>
