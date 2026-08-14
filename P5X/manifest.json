@@ -4,15 +4,15 @@
   "MainPluginAuthor": "Voheart",
   "MainPluginDescription": "A plugin for Persona 5: The Phantom X (P5X) in Collapse Launcher",
   "PluginStandardVersion": "0.1.5.0",
-  "PluginVersion": "0.0.5.0",
+  "PluginVersion": "0.0.6.0",
   "PluginCreationDate": "2026-02-01T00:00:00+00:00",
-  "ManifestDate": "2026-08-13T15:02:31.6079878+00:00",
+  "ManifestDate": "2026-08-14T13:39:12.9107487+00:00",
   "PluginAlternativeIcon": "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",
   "Assets": [
     {
-      "FilePath": "Lib\\win-arm64\\libzstd.dll",
-      "Size": 622080,
-      "FileHash": "o3twWee0EH8jjAq6W7mgHw=="
+      "FilePath": "Lib\\linux-x64\\libzstd.so",
+      "Size": 881304,
+      "FileHash": "WGPn1VbUF6XxGmlYre1uCA=="
     },
     {
       "FilePath": "Lib\\linux-x64\\libzstd-bmi2.so",
@@ -20,14 +20,9 @@
       "FileHash": "4lNaP4JjVJytbvho5Kwftg=="
     },
     {
-      "FilePath": "Lib\\linux-x64\\libzstd.so",
-      "Size": 881304,
-      "FileHash": "WGPn1VbUF6XxGmlYre1uCA=="
-    },
-    {
-      "FilePath": "Lib\\win-x64\\libzstd-bmi2.dll",
-      "Size": 1254833,
-      "FileHash": "4Ju9O7j1IchQJKzjGqZeSA=="
+      "FilePath": "Lib\\win-x64\\libzstd.dll",
+      "Size": 661504,
+      "FileHash": "xgXcAQilBZHeWaTq0OD9xw=="
     },
     {
       "FilePath": "Lib\\win-x86\\libzstd.dll",
@@ -35,14 +30,19 @@
       "FileHash": "9o8SXhb+Hx1XQd8QhEitSg=="
     },
     {
-      "FilePath": "Lib\\win-x64\\libzstd.dll",
-      "Size": 661504,
-      "FileHash": "xgXcAQilBZHeWaTq0OD9xw=="
+      "FilePath": "Lib\\win-x64\\libzstd-bmi2.dll",
+      "Size": 1254833,
+      "FileHash": "4Ju9O7j1IchQJKzjGqZeSA=="
+    },
+    {
+      "FilePath": "Lib\\win-arm64\\libzstd.dll",
+      "Size": 622080,
+      "FileHash": "o3twWee0EH8jjAq6W7mgHw=="
     },
     {
       "FilePath": "P5X.dll",
-      "Size": 9447424,
-      "FileHash": "f+LOBC4oXO/N09m9cKk6Lw=="
+      "Size": 9454080,
+      "FileHash": "UZ3C3FkRZwjBx7NUfMDopw=="
     }
   ]
 }
