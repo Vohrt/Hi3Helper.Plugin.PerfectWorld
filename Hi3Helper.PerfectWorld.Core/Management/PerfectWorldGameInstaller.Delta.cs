@@ -246,7 +246,11 @@ public partial class PerfectWorldGameInstaller
                 TotalBytesToDownload = totalTransfer,
                 DownloadedBytes      = 0,
                 TotalCountToDownload = totalCount,
-                DownloadedCount      = upToDateTotalCount
+                DownloadedCount      = upToDateTotalCount,
+                // See the note in ReconcileToManifestAsync: mirror the counts into the state fields so older Collapse
+                // builds (which read StateCount/TotalStateToComplete for the "X / Y" label) show progress too.
+                TotalStateToComplete = totalCount,
+                StateCount           = upToDateTotalCount
             };
             _lastReportTick = 0;
         }

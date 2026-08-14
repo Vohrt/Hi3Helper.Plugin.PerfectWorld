@@ -236,7 +236,12 @@ public partial class PerfectWorldGameInstaller
                 TotalBytesToDownload = totalBytes,
                 DownloadedBytes      = existingBytes,
                 TotalCountToDownload = totalCount,
-                DownloadedCount      = existingCount
+                DownloadedCount      = existingCount,
+                // Mirror the file counts into the state fields as well: older Collapse builds render the on-ring
+                // "X / Y" label from StateCount/TotalStateToComplete (newer builds prefer the asset counts), so
+                // keeping both in sync — as the official plugins do — makes the count show on every host version.
+                TotalStateToComplete = totalCount,
+                StateCount           = existingCount
             };
             _lastReportTick = 0;
         }
@@ -328,6 +333,9 @@ public partial class PerfectWorldGameInstaller
 
             _progress.DownloadedBytes = downloadedBytes;
             _progress.DownloadedCount = downloadedCount;
+            // Keep the state counter in lockstep with the asset counter so the host's file-count display advances
+            // regardless of whether it reads DownloadedCount or StateCount (see the initializer note above).
+            _progress.StateCount      = downloadedCount;
             progressDelegate(in _progress);
         }
     }
