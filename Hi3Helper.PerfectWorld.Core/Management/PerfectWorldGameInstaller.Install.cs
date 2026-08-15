@@ -37,6 +37,14 @@ public partial class PerfectWorldGameInstaller
     private InstallProgress _progress;
     private long _lastReportTick;
 
+    // The active install phase and its status delegate, captured when the download/patch phase begins. Every
+    // progress report re-invokes this state delegate so the host rebuilds its on-ring "X / Y" file-count label with
+    // the current count. Older Collapse builds only (re)build that label inside their status callback — which is
+    // driven by the state delegate — so without re-asserting the state on each report the count would freeze at the
+    // value captured when the phase began (a fresh install would sit at "0 / N" for the whole download).
+    private InstallProgressStateDelegate? _activeStateDelegate;
+    private InstallProgressState _activeReportState;
+
     /// <summary>
     ///     Fetches and decodes the <c>ResList</c> manifest for the current remote resource version (cached),
     ///     returning both the directly content-addressed <c>&lt;Res&gt;</c> files and the packed <c>&lt;Pak&gt;</c>
@@ -166,7 +174,18 @@ public partial class PerfectWorldGameInstaller
             throw new IOException("Manifest contained no file entries.");
 
         // --- Verify: decide which files/paks need downloading -------------------------------------------
-        progressStateDelegate?.Invoke(InstallProgressState.Verify);
+        // Fetch the launcher self-update manifest up-front so the verify total (game files + packed pak files +
+        // launcher files) is fixed before verification begins; this lets the host's "Verifying: X / Y" count run
+        // live against a stable total as each file is checked, instead of sitting frozen for the whole phase.
+        PerfectWorldLauncherManifest launcherManifest =
+            await GetLauncherManifestAsync(token).ConfigureAwait(false);
+
+        int verifyTotalCount = manifest.Count + paks.Sum(p => p.Files.Count) + launcherManifest.Files.Count;
+        BeginVerifyPhase(verifyTotalCount, progressDelegate, progressStateDelegate);
+
+        int verifiedCount = 0;
+        void ReportVerified(int delta) =>
+            ReportProgress(0, Interlocked.Add(ref verifiedCount, delta), progressDelegate, force: false);
 
         var toDownload = new ConcurrentBag<PerfectWorldResEntry>();
         var paksToDownload = new ConcurrentBag<PerfectWorldPakEntry>();
@@ -199,6 +218,8 @@ public partial class PerfectWorldGameInstaller
                 {
                     toDownload.Add(entry);
                 }
+
+                ReportVerified(1);
             }).ConfigureAwait(false);
 
         await Parallel.ForEachAsync(paks,
@@ -214,20 +235,28 @@ public partial class PerfectWorldGameInstaller
                 {
                     paksToDownload.Add(pak);
                 }
+
+                ReportVerified(pak.Files.Count);
             }).ConfigureAwait(false);
 
         // The vendor launcher (NTELauncher\) is required at runtime: it hosts the account-login UI and drives the
         // game process, so it is installed alongside the game itself. Classify its files here so their bytes/count
         // fold into the same progress totals as the game download.
-        LauncherPlan launcherPlan = await PrepareLauncherPlanAsync(installPath, verifyHash, token).ConfigureAwait(false);
+        LauncherPlan launcherPlan = await PrepareLauncherPlanAsync(installPath, verifyHash, token,
+            launcherManifest, () => ReportVerified(1)).ConfigureAwait(false);
         existingBytes += launcherPlan.ExistingZipBytes;
         existingCount += launcherPlan.ExistingCount;
 
         long totalBytes = manifest.Sum(e => e.FileSize) + paks.Sum(p => p.FileSize) + launcherPlan.TotalZipBytes;
         int totalCount = manifest.Count + paks.Sum(p => p.Files.Count) + launcherPlan.TotalCount;
 
+        // Verification finished: force a final "Verifying: Y / Y" report so the count visibly completes even when the
+        // throttled per-file reports above didn't land on the last value (a fast size-only verify may otherwise only
+        // ever show "0 / Y" before the phase flips to Download).
+        ReportProgress(0, verifyTotalCount, progressDelegate, force: true);
+
         // --- Download -----------------------------------------------------------------------------------
-        progressStateDelegate?.Invoke(verifyHash ? InstallProgressState.Updating : InstallProgressState.Download);
+        InstallProgressState downloadState = verifyHash ? InstallProgressState.Updating : InstallProgressState.Download;
 
         lock (_reportLock)
         {
@@ -243,8 +272,15 @@ public partial class PerfectWorldGameInstaller
                 TotalStateToComplete = totalCount,
                 StateCount           = existingCount
             };
-            _lastReportTick = 0;
+            _lastReportTick      = 0;
+            _activeStateDelegate = progressStateDelegate;
+            _activeReportState   = downloadState;
         }
+
+        // Emit one combined progress+state report up front so the host populates the on-ring "X / Y" label
+        // immediately. ReportProgress drives both delegates (see its note); this also seeds the correct starting
+        // count when resuming a partially completed install instead of leaving the label at its "-" default.
+        ReportProgress(existingBytes, existingCount, progressDelegate, force: true);
 
         long downloadedBytes = existingBytes;
         int downloadedCount = existingCount;
@@ -320,6 +356,35 @@ public partial class PerfectWorldGameInstaller
             remote.ResVersion, manifest.Count, paks.Count, launcherPlan.TotalCount);
     }
 
+    /// <summary>
+    ///     Seeds the shared progress state for the Verify phase and switches the host label to "Verifying: 0 / total".
+    ///     Records the state delegate and the Verify phase so that every subsequent <see cref="ReportProgress"/> call
+    ///     re-asserts the state — older Collapse builds only (re)build the on-ring "X / Y" label inside their status
+    ///     callback (driven by the state delegate), so without re-asserting on each report the count would freeze for
+    ///     the whole verification pass. Byte fields are left at 0: nothing is downloaded while verifying, so the byte
+    ///     bar reads 0% until the download phase sets the real totals — the file count is the meaningful verify signal.
+    /// </summary>
+    private void BeginVerifyPhase(int verifyTotalCount, InstallProgressDelegate? progressDelegate,
+        InstallProgressStateDelegate? progressStateDelegate)
+    {
+        lock (_reportLock)
+        {
+            _progress = new InstallProgress
+            {
+                TotalCountToDownload = verifyTotalCount,
+                TotalStateToComplete = verifyTotalCount
+            };
+            _lastReportTick      = 0;
+            _activeStateDelegate = progressStateDelegate;
+            _activeReportState   = InstallProgressState.Verify;
+        }
+
+        // Set the label immediately. This also covers the progressDelegate == null case, where ReportProgress is a
+        // no-op and would otherwise never switch the host into the Verify state.
+        progressStateDelegate?.Invoke(InstallProgressState.Verify);
+        ReportProgress(0, 0, progressDelegate, force: true);
+    }
+
     private void ReportProgress(long downloadedBytes, int downloadedCount,
         InstallProgressDelegate? progressDelegate, bool force)
     {
@@ -337,6 +402,12 @@ public partial class PerfectWorldGameInstaller
             // regardless of whether it reads DownloadedCount or StateCount (see the initializer note above).
             _progress.StateCount      = downloadedCount;
             progressDelegate(in _progress);
+
+            // Re-assert the install phase on every report. Older Collapse builds only (re)build the on-ring
+            // "X / Y" label inside their status callback, which is driven by this state delegate — without this
+            // the label would freeze at the count captured when the phase began. Reporting both delegates together
+            // on every progress point mirrors the official plugins and keeps the count live on every host version.
+            _activeStateDelegate?.Invoke(_activeReportState);
         }
     }
 

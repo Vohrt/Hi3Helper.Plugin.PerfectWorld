@@ -169,38 +169,58 @@ public partial class PerfectWorldGameInstaller
         }
 
         // --- Verify: classify each manifest entry (up-to-date / delta / full) ---------------------------
-        progressStateDelegate?.Invoke(InstallProgressState.Verify);
+        // Fetch the launcher self-update manifest up-front so the verify total is fixed before hashing begins. The
+        // delta-update verify hashes every existing file (potentially tens of GB), so a live "Verifying: X / Y" count
+        // is essential feedback here rather than a count that stays frozen for the whole phase.
+        PerfectWorldLauncherManifest launcherManifest =
+            await GetLauncherManifestAsync(token).ConfigureAwait(false);
+
+        int verifyTotalCount = manifest.Count + paks.Sum(p => p.Files.Count) + launcherManifest.Files.Count;
+        BeginVerifyPhase(verifyTotalCount, progressDelegate, progressStateDelegate);
+
+        int verifiedCount = 0;
+        void ReportVerified(int delta) =>
+            ReportProgress(0, Interlocked.Add(ref verifiedCount, delta), progressDelegate, force: false);
 
         var plans = new ConcurrentBag<UpdatePlan>();
         await Parallel.ForEachAsync(manifest,
             new ParallelOptions { MaxDegreeOfParallelism = VerifyParallelism, CancellationToken = token },
             async (entry, ct) =>
             {
-                string localPath = Path.Combine(installPath,
-                    entry.Filename.Replace('/', Path.DirectorySeparatorChar));
-
-                bool exists = File.Exists(localPath);
-                if (exists && new FileInfo(localPath).Length == entry.FileSize &&
-                    await CheckMd5Async(localPath, entry.Md5, ct).ConfigureAwait(false))
+                try
                 {
-                    return; // already at target
-                }
+                    string localPath = Path.Combine(installPath,
+                        entry.Filename.Replace('/', Path.DirectorySeparatorChar));
 
-                if (exists &&
-                    patchByNew.TryGetValue(entry.Md5, out Dictionary<string, PerfectWorldPatchEntry>? byOld) &&
-                    byOld.Count > 0)
-                {
-                    string localMd5 = await ComputeMd5Async(localPath, ct).ConfigureAwait(false);
-                    if (byOld.TryGetValue(localMd5, out PerfectWorldPatchEntry? patch) &&
-                        patch.NewSize == entry.FileSize &&
-                        patch.PatchSize < entry.FileSize) // only worthwhile if the patch is smaller than a full fetch
+                    bool exists = File.Exists(localPath);
+                    if (exists && new FileInfo(localPath).Length == entry.FileSize &&
+                        await CheckMd5Async(localPath, entry.Md5, ct).ConfigureAwait(false))
                     {
-                        plans.Add(UpdatePlan.Delta(entry, patch));
-                        return;
+                        return; // already at target
                     }
-                }
 
-                plans.Add(UpdatePlan.Full(entry));
+                    if (exists &&
+                        patchByNew.TryGetValue(entry.Md5, out Dictionary<string, PerfectWorldPatchEntry>? byOld) &&
+                        byOld.Count > 0)
+                    {
+                        string localMd5 = await ComputeMd5Async(localPath, ct).ConfigureAwait(false);
+                        if (byOld.TryGetValue(localMd5, out PerfectWorldPatchEntry? patch) &&
+                            patch.NewSize == entry.FileSize &&
+                            patch.PatchSize < entry.FileSize) // only worthwhile if the patch is smaller than a full fetch
+                        {
+                            plans.Add(UpdatePlan.Delta(entry, patch));
+                            return;
+                        }
+                    }
+
+                    plans.Add(UpdatePlan.Full(entry));
+                }
+                finally
+                {
+                    // Report inside a finally so the verify count advances on every classification outcome
+                    // (up-to-date / delta / full), each of which returns from a different point above.
+                    ReportVerified(1);
+                }
             }).ConfigureAwait(false);
 
         List<UpdatePlan> planList = plans.ToList();
@@ -216,6 +236,8 @@ public partial class PerfectWorldGameInstaller
             {
                 if (!await IsPakCompleteAsync(pak, installPath, verifyHash: true, ct).ConfigureAwait(false))
                     paksToDownload.Add(pak);
+
+                ReportVerified(pak.Files.Count);
             }).ConfigureAwait(false);
 
         int pakFilesTotal = paks.Sum(p => p.Files.Count);
@@ -225,7 +247,8 @@ public partial class PerfectWorldGameInstaller
         // The vendor launcher (NTELauncher\) is required at runtime; make sure it is present/up-to-date on updates
         // too (its self-update manifest may bump versions independently of the game resources).
         LauncherPlan launcherPlan =
-            await PrepareLauncherPlanAsync(installPath, verifyHash: true, token).ConfigureAwait(false);
+            await PrepareLauncherPlanAsync(installPath, verifyHash: true, token,
+                launcherManifest, () => ReportVerified(1)).ConfigureAwait(false);
 
         totalTransfer += pakTransfer + launcherPlan.ToDownloadZipBytes;
         int totalCount = manifest.Count + pakFilesTotal + launcherPlan.TotalCount;
@@ -236,9 +259,11 @@ public partial class PerfectWorldGameInstaller
             "[PerfectWorldInstaller] Update {Version}: {UpToDate} up-to-date, {Delta} delta, {Full} full, {Paks} paks ({Bytes} bytes).",
             remote.ResVersion, upToDate, deltaCount, planList.Count - deltaCount, paksToDownload.Count, totalTransfer);
 
-        // --- Update: download patches/files and apply ---------------------------------------------------
-        progressStateDelegate?.Invoke(InstallProgressState.Updating);
+        // Verification finished: force a final "Verifying: Y / Y" report so the count visibly completes even when the
+        // throttled per-file reports above didn't land on the last value.
+        ReportProgress(0, verifyTotalCount, progressDelegate, force: true);
 
+        // --- Update: download patches/files and apply ---------------------------------------------------
         lock (_reportLock)
         {
             _progress = new InstallProgress
@@ -252,8 +277,15 @@ public partial class PerfectWorldGameInstaller
                 TotalStateToComplete = totalCount,
                 StateCount           = upToDateTotalCount
             };
-            _lastReportTick = 0;
+            _lastReportTick      = 0;
+            _activeStateDelegate = progressStateDelegate;
+            _activeReportState   = InstallProgressState.Updating;
         }
+
+        // Emit one combined progress+state report up front so the host shows the correct starting "X / Y" count for
+        // the update. ReportProgress drives both delegates (older builds only rebuild that label on the state
+        // delegate — see ReportProgress), keeping the count live instead of frozen at the phase-entry value.
+        ReportProgress(0, upToDateTotalCount, progressDelegate, force: true);
 
         long downloadedBytes = 0;
         int downloadedCount = upToDateTotalCount;

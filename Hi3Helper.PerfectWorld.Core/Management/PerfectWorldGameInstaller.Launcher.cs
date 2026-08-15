@@ -74,11 +74,16 @@ public partial class PerfectWorldGameInstaller
     /// <summary>
     ///     Classifies every launcher file as already-present (correct size, and correct MD5 when
     ///     <paramref name="verifyHash"/> is set) or needing download, returning the resulting <see cref="LauncherPlan"/>.
+    ///     Pass <paramref name="prefetchedManifest"/> to reuse an already-downloaded launcher manifest (so the verify
+    ///     total can be computed before this call) and <paramref name="onFileVerified"/> to receive a callback as each
+    ///     launcher file is checked, which lets the caller advance the live "Verifying: X / Y" count.
     /// </summary>
     private async Task<LauncherPlan> PrepareLauncherPlanAsync(string installPath, bool verifyHash,
-        CancellationToken token)
+        CancellationToken token, PerfectWorldLauncherManifest? prefetchedManifest = null,
+        Action? onFileVerified = null)
     {
-        PerfectWorldLauncherManifest manifest = await GetLauncherManifestAsync(token).ConfigureAwait(false);
+        PerfectWorldLauncherManifest manifest =
+            prefetchedManifest ?? await GetLauncherManifestAsync(token).ConfigureAwait(false);
         string launcherRoot = Path.Combine(installPath, LauncherRootDirName);
 
         var toDownload = new List<PerfectWorldLauncherFile>();
@@ -111,6 +116,8 @@ public partial class PerfectWorldGameInstaller
             {
                 toDownload.Add(file);
             }
+
+            onFileVerified?.Invoke();
         }
 
         return new LauncherPlan(manifest, toDownload, totalZip, manifest.Files.Count, existingZip, existingCount);
