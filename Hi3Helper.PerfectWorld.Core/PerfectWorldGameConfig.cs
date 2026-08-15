@@ -118,17 +118,43 @@ public sealed class PerfectWorldGameConfig
     public string? LocalBackgroundResPackRelativePath { get; init; }
 
     /// <summary>
-    ///     Install-relative path substrings whose matching manifest content the game client downloads itself on
-    ///     demand, so the plugin must NOT fetch it at install time. For 异环/NTE this is <c>["/TagPatchPaks/"]</c>:
-    ///     the per-language voice packs (<c>pakchunk101</c> = Chinese, <c>102/103/104</c> = Japanese/English/Korean)
-    ///     live there, the official launcher ships none of them, and the UE client downloads the default (Chinese)
-    ///     voice on first launch plus any other language the player later selects in-game — matching how the
-    ///     officially supported titles defer voice. Matching is a case-insensitive substring test against the
-    ///     forward-slash manifest path. Empty (the default) downloads the entire manifest, so games without an
-    ///     on-demand channel (e.g. P5X, whose Zeus asset system already ships no voice in the pw_sdk manifest) are
-    ///     unaffected.
+    ///     Install-relative path substrings whose matching manifest content is deferred (NOT fetched at install
+    ///     time) because it is optional, on-demand content. For 异环/NTE this is <c>["/TagPatchPaks/"]</c>: the
+    ///     per-language voice packs (<c>pakchunk101</c> = Chinese, <c>102/103/104</c> = Japanese/English/Korean)
+    ///     live there. The plugin still installs the single default-language voice the game requires to run (see
+    ///     <see cref="DeferredContentKeepMarkers"/>) and defers the rest for on-demand download in-game, mirroring
+    ///     the official launcher, which ships exactly one voice language and offers the others for later download.
+    ///     Matching is a case-insensitive substring test against the forward-slash manifest path. Empty (the
+    ///     default) downloads the entire manifest, so games without an on-demand channel (e.g. P5X, whose Zeus asset
+    ///     system already ships no voice in the pw_sdk manifest) are unaffected.
     /// </summary>
     public string[] DeferredContentPathMarkers { get; init; } = [];
+
+    /// <summary>
+    ///     Exceptions to <see cref="DeferredContentPathMarkers"/>: install-relative path substrings that are kept
+    ///     (downloaded) even though they also match a defer marker. This installs the single default-language voice
+    ///     the game must have present to launch without looping on "更新失败", while every other language under the
+    ///     same deferred directory stays deferred. For 异环/NTE this is <c>["/TagPatchPaks/pakchunk101"]</c> (the
+    ///     Chinese voice, <c>pakchunk101</c>) — matching the official install, which keeps exactly that one. A path
+    ///     is deferred only when it matches a marker in <see cref="DeferredContentPathMarkers"/> AND matches none
+    ///     here. Empty (the default) keeps nothing extra, so a fresh language the vendor adds later is auto-deferred.
+    /// </summary>
+    public string[] DeferredContentKeepMarkers { get; init; } = [];
+
+    /// <summary>
+    ///     When <see langword="true"/>, the plugin writes a finalized native <c>pw_sdk PatcherSDK</c> state
+    ///     (<c>{LauncherRootDirName}\UserData\Patcher\PatcherSDK\config.xml</c> + <c>ResList.xml</c>) after a
+    ///     successful install or update. This is REQUIRED for titles whose in-game client hands control back to the
+    ///     native patcher (e.g. 异环/NTE): because the plugin downloads game files directly it never runs the vendor
+    ///     patcher that would normally author these files, so without them the patcher sees local version 0.0, decides
+    ///     the whole build is missing and loops on "更新失败" (update failed). The forged state records the base build
+    ///     as installed together with the single default-language voice the plugin keeps (see
+    ///     <see cref="DeferredContentKeepMarkers"/>) as an installed <c>&lt;BaseVerson&gt;</c> section, and records the
+    ///     deferred languages as NOT installed, so the client plays the default voice and offers each other language
+    ///     for on-demand download in-game. Left <see langword="false"/> (the default) for titles that do not need it
+    ///     (e.g. P5X), leaving their flow unchanged.
+    /// </summary>
+    public bool WritePatcherState { get; init; }
 
     /// <summary>
     ///     Substrings that, when found in the launcher log, indicate that the cached-token auto-login failed and an

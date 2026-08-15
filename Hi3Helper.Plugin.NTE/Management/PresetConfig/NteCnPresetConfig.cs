@@ -44,9 +44,18 @@ public partial class NteCnPresetConfig : PluginPresetConfigBase
         // point (NTELauncher.exe); the latter guarantees the account-login path is available before showing "Launch".
         InstallMarkerRelativePaths       = [InstallMarkerName, LauncherBootstrapperName],
         LauncherBootstrapperRelativePath = LauncherBootstrapperName,
-        // The launcher drives everything from its own settings (patched at launch), so no extra arg is needed here.
-        // "/autoplay" is passed as a harmless hint in case the bootstrapper forwards it to NTEGame.exe.
-        LaunchArguments                  = "/autoplay",
+        // CRITICAL: do NOT pass "/autoplay" here. NTELauncher.exe forwards its extra command-line args verbatim to
+        // NTEGame.exe (the arg string "autoplay" exists only in NTEGame.exe, not in NTELauncher.exe), and NTEGame.exe
+        // treats "/autoplay" as "skip the resource updater and launch the game NOW": with it, the log goes straight
+        // to `status 0 --> 7` then `GameClientAgent::launchGame` with the `GameResUpdaterAgent` check never running;
+        // without it (official flow) NTEGame runs `_initGameResUpdater -> onBeginCheckGameResVersion ->
+        // onBaseResCheckFinished -> (download) -> patcherResUpdateFinsh` before launching. That vendor updater is what
+        // reconciles the voice/tag resources and hands the in-game updater a valid state — skipping it left every
+        // voice language shown WITHOUT a size and made the in-game updater loop on "更新失败" after returning to the
+        // login screen, no matter what the on-disk PatcherSDK state said (reproduced on a pristine official install).
+        // 异环's launcher already auto-starts the game from the patched INI (autoRun=1), so NO launch arg is needed.
+        // (P5X is the opposite — its launcher gates auto-play server-side and REQUIRES /autoplay; see P5xCnPresetConfig.)
+        LaunchArguments                  = "",
         // Silent-launch: patch the launcher's own settings so it auto-logs-in, auto-starts the game (no "Start"
         // click) and quits together with the game (no reappear afterwards). Window hiding during start-up is added
         // automatically when Collapse itself runs as administrator (NTEGame.exe is force-elevated).
@@ -54,10 +63,18 @@ public partial class NteCnPresetConfig : PluginPresetConfigBase
         LauncherSettingsIniRelativePath  = @"NTELauncher\UserData\Config\Config.ini",
         LauncherProcessBaseNames         = ["NTEGame", "NTELauncher", "NTEUpdate", "NTEBrowser", "NTEWebBooster", "NTEErrRep"],
         LauncherStartupRevealTimeoutSeconds = 120,
-        // 异环's UE client downloads voice on demand — the default (Chinese) on first launch and other languages
-        // when the player selects them in-game — exactly like the official launcher, which ships no TagPatchPaks.
-        // Defer that whole directory so the plugin install doesn't pull ~3-5 GB of voice the game manages itself.
-        DeferredContentPathMarkers       = ["/TagPatchPaks/"]
+        // 异环 requires the default (Chinese) voice, pakchunk101, to be present on disk to launch — exactly like the
+        // official install, which ships one voice language and offers the rest for on-demand download. Defer the whole
+        // TagPatchPaks directory so the plugin doesn't pull all ~5 GB of voice, but KEEP pakchunk101 so the game has a
+        // working default voice; the other languages (102/103/104 = JP/EN/KR) stay deferred for in-game download.
+        DeferredContentPathMarkers       = ["/TagPatchPaks/"],
+        DeferredContentKeepMarkers       = ["/TagPatchPaks/pakchunk101"],
+        // Because the plugin downloads the game directly it never runs the vendor pw_sdk patcher that authors the
+        // native PatcherSDK\config.xml + ResList.xml. 异环 hands control to that patcher on launch, so without those
+        // files it sees local version 0.0, thinks the whole build is missing and loops on "更新失败". Author a
+        // finalized state after install/update — base build + the kept default voice recorded as installed, the
+        // deferred languages recorded as available — to fix the loop and let the game play/download voice correctly.
+        WritePatcherState                = true
     };
 
     private static readonly PerfectWorldNewsConfig NteNewsConfig = new()
