@@ -257,6 +257,28 @@ listed every voice language *without* a size (i.e. it thought they were all alre
 skipped/under-seeded updater never established a valid local state. Bundling all voices up front sidesteps that
 entirely, at the cost of extra disk and bandwidth.
 
+**Design note (P5X) — why `/autoplay` is safe here, unlike NTE.** P5X does *not* have NTE's voice pitfall,
+because it splits its content across **two independent layers** and its optional voices live in the layer
+`/autoplay` can never touch:
+
+* **Base client (~1.1 GB, 125 files)** — managed by the same vendor `PatcherSDK` NTE uses (its on-disk
+  `config.xml` states `ResCount=125`, `ResSize=1155828821`). This is the Unity runtime, Lua, and a little base
+  CRIWare audio / opening CGs under `client\bin\Media\`. The plugin (like the official launcher) installs
+  exactly this layer; a fresh plugin install lands only ~1.1 GB.
+* **Game body (~80 GB)** — managed by the game's *own* Zeus engine under `client\OuterPackage\`, fetched
+  in-game via `HotFixTemp\DownloadTemp` the first time you enter. This includes all AssetBundles and the
+  **optional sub-packages**, among them the voice/localization packs `optlocalcn` (Chinese) and `optlocaljp`
+  (Japanese) under `client\OuterPackage\ZeusSetting\SubpackageReadyOptionalTag\`.
+
+The "开始游戏" button therefore does: `P5XGame.exe` (launcher) logs in → `GameClientAgent::launchGame` →
+`GameLifecycleMgr::startGame` → runs `client\pc\P5X.exe` (Unity) → Zeus downloads/verifies the ~80 GB
+OuterPackage and any opted-in sub-packages. `/autoplay` only auto-clicks that button (overriding the
+server-side `canAutoPlay=false`); it is forwarded to the *launcher*, not the Unity game, so it never bypasses
+the Zeus content updater. In short: **NTE puts voices in the launcher/PatcherSDK domain that `/autoplay`
+skips, whereas P5X puts them in the game-engine domain `/autoplay` cannot reach** — so P5X needs no
+voice-bundling workaround, and the plugin carries no `OuterPackage`/sub-package logic at all (the game handles
+it, exactly like the official launcher).
+
 **Known issue (NTE) — the button can stay on *game running* for a while after you quit.** NTE's vendor launcher
 owns the game process's lifetime: when you close the game it does **not** terminate `HTGame.exe` right away —
 it leaves the process running idle (with no window) and only reaps it some time later. This appears to be a
