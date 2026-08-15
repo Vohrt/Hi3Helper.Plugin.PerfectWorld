@@ -366,11 +366,6 @@ public partial class PerfectWorldGameInstaller
         // --- Completion ---------------------------------------------------------------------------------
         ReportProgress(Volatile.Read(ref downloadedBytes), totalCount, progressDelegate, force: true);
 
-        // Refresh the native pw_sdk patcher state to the updated version so the game client accepts the update
-        // (records the new base build as installed, no voice). No-op unless the game opts in via
-        // PerfectWorldGameConfig.WritePatcherState.
-        await WritePatcherStateAsync(installPath, remote, bundle, token).ConfigureAwait(false);
-
         Manager.WriteInstalledResVersion(remote.ResVersion);
         progressStateDelegate?.Invoke(InstallProgressState.Completed);
 

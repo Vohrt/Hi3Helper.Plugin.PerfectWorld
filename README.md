@@ -233,12 +233,29 @@ The per-game specifics differ:
   zip-compressed files, ≈237 MB; zero-length entries carry a bogus placeholder checksum and are validated by
   emptiness instead of MD5); launch runs `NTELauncher\NTELauncher.exe` with the working directory set to the
   install root, exactly like the official 异环 shortcut. A finished install needs both `HTGameBase.dll` and
-  `NTELauncher.exe`. NTE's launcher auto-starts the game from its own settings, so no extra launch flag is
-  needed.
+  `NTELauncher.exe`. Launch passes `/autoplay`, which `NTELauncher.exe` forwards verbatim to `NTEGame.exe` so
+  the game auto-starts without a manual "开始游戏" click. Because `/autoplay` makes `NTEGame.exe` skip its
+  in-process resource updater — the step that would otherwise fetch a voice language on demand — the plugin
+  downloads **all** of NTE's voice languages up front at install/update time (see *Known issues* below).
 * **P5X** (Unity IL2CPP, `client\pc\P5X.exe`). The plugin launches `P5XLaunch\P5XGame.exe` directly with
   `/launcher /directly /autoplay`. The `/autoplay` flag is essential — P5X's launcher gates auto-play off
   *server-side* (`canAutoPlay=false`), so patching the INI alone is not enough and it would otherwise stop at
   the "开始游戏" button. A finished install needs both `GameAssembly.dll` and `P5XGame.exe`.
+
+**Known issue (NTE) — every voice language is downloaded, not just one.** The official launcher installs the
+base game plus a single default (Chinese) voice and lets the in-game updater fetch the other languages
+(Japanese / English / Korean) on demand, so a fresh official install lists those three with a download size.
+The plugin instead ships **all four** voice packs at install/update time, so an NTE install is ~5 GB larger
+than the official one and the in-game menu shows every language as already installed. This is deliberate and
+tied to `/autoplay` (above): that flag auto-starts the game but makes `NTEGame.exe` skip the in-process
+`GameResUpdaterAgent` — the very component that reconciles/downloads voices on demand and seeds the in-game
+updater's hand-off state. An earlier version tried to mirror the official launcher — defer the non-default
+voices, drop `/autoplay`, and forge the native `PatcherSDK` state files (`config.xml` / `ResList.xml` /
+`tmp\client.xml`) so the game would believe one voice was installed and fetch the rest itself. It was
+**abandoned**: in practice the game looped on "更新失败" (update failed) after returning to the login screen and
+listed every voice language *without* a size (i.e. it thought they were all already installed), because the
+skipped/under-seeded updater never established a valid local state. Bundling all voices up front sidesteps that
+entirely, at the cost of extra disk and bandwidth.
 
 **Known issue (NTE) — the button can stay on *game running* for a while after you quit.** NTE's vendor launcher
 owns the game process's lifetime: when you close the game it does **not** terminate `HTGame.exe` right away —

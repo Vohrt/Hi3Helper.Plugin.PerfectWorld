@@ -4,7 +4,6 @@ using System.Collections.Generic;
 using System.IO;
 using System.IO.Compression;
 using System.Linq;
-using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using Hi3Helper.Plugin.Core;
@@ -22,9 +21,6 @@ public partial class PerfectWorldGameInstaller
     /// <summary>Sub-directory (under the install root) used to stage downloaded pak blobs before extraction.</summary>
     private const string PakStagingDirName = ".perfectworld_pak_cache";
 
-    /// <summary>UTF-8 without a BOM, matching the vendor's plaintext <c>config.xml</c> byte format exactly.</summary>
-    private static readonly Encoding Utf8NoBom = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false);
-
     /// <summary>Concurrency for pak downloads; kept lower than file downloads because pak blobs are large.</summary>
     private const int PakDownloadParallelism = 2;
 
@@ -33,10 +29,6 @@ public partial class PerfectWorldGameInstaller
 
     private ManifestBundle? _cachedManifest;
     private string? _cachedManifestVersion;
-
-    // The raw decoded catalog XML (ResList.bin) for the cached manifest version. Retained so the finalized
-    // patcher-state writer can copy the large files' <Block> checksums without re-fetching/decoding the catalog.
-    private string? _cachedCatalogXml;
 
     /// <summary>Serialises manifest (re)fetches so concurrent callers don't each download+decode the same bundle.</summary>
     private readonly SemaphoreSlim _manifestLock = new(1, 1);
@@ -84,14 +76,12 @@ public partial class PerfectWorldGameInstaller
             List<PerfectWorldResEntry> files = PerfectWorldManifest.ParseResList(xml);
             List<PerfectWorldPakEntry> paks = PerfectWorldManifest.ParsePackages(xml);
 
-            // Drop content the game client fetches on demand (configured per game via DeferredContentPathMarkers). For
-            // 异环/NTE this removes the non-default per-language voice packs under Content/TagPatchPaks/, mirroring the
-            // official launcher: it ships the base game plus exactly one default (Chinese) voice — kept here via
-            // DeferredContentKeepMarkers — and offers the other languages for on-demand download in-game. Filtering
-            // here keeps the size query, install and update paths mutually consistent because all of them read the
-            // manifest exclusively through this (cached) method.
-            ManifestBundle bundle = ApplyDeferredContentFilter(
-                files, paks, config.DeferredContentPathMarkers, config.DeferredContentKeepMarkers);
+            // The plugin installs the entire manifest as authored by the vendor: all directly-addressed files plus all
+            // packed pak archives, including every per-language voice pack under Content/TagPatchPaks/. 异环/NTE needs
+            // all voices present on disk because launch uses /autoplay, which makes NTEGame.exe skip the in-game
+            // resource updater that would otherwise fetch a voice language on demand. Reading the manifest exclusively
+            // through this (cached) method keeps the size query, install and update paths mutually consistent.
+            ManifestBundle bundle = new(files, paks);
 
             long packedCount = 0;
             foreach (PerfectWorldPakEntry pak in bundle.Paks) packedCount += pak.Files.Count;
@@ -102,7 +92,6 @@ public partial class PerfectWorldGameInstaller
 
             _cachedManifest = bundle;
             _cachedManifestVersion = remote.ResVersion;
-            _cachedCatalogXml = xml;
             return bundle;
         }
         finally
@@ -111,63 +100,6 @@ public partial class PerfectWorldGameInstaller
         }
     }
 
-    /// <summary>
-    ///     Removes manifest content the game client itself downloads on demand, so the plugin does not fetch it at
-    ///     install time. Driven by <see cref="PerfectWorldGameConfig.DeferredContentPathMarkers"/> together with the
-    ///     <see cref="PerfectWorldGameConfig.DeferredContentKeepMarkers"/> exceptions: for 异环/NTE it drops the
-    ///     non-default per-language voice packs under <c>Content/TagPatchPaks/</c> while keeping the single default
-    ///     (Chinese, <c>pakchunk101</c>) voice the game requires to launch — matching the official install, which
-    ///     keeps exactly one voice language. A directly-addressed <c>&lt;Res&gt;</c> file is dropped when its path is
-    ///     deferred (matches a marker and no keep exception); a packed <c>&lt;Pak&gt;</c> archive is dropped only when
-    ///     <em>every</em> file it bundles is deferred, because a pak blob is downloaded whole and sliced, so a pak
-    ///     mixing deferred and required entries must be kept.
-    /// </summary>
-    private static ManifestBundle ApplyDeferredContentFilter(List<PerfectWorldResEntry> files,
-        List<PerfectWorldPakEntry> paks, string[] markers, string[] keepMarkers)
-    {
-        if (markers.Length == 0)
-            return new ManifestBundle(files, paks);
-
-        bool IsDeferred(string path)
-        {
-            bool matched = false;
-            foreach (string marker in markers)
-                if (path.Contains(marker, StringComparison.OrdinalIgnoreCase)) { matched = true; break; }
-            if (!matched)
-                return false;
-
-            foreach (string keep in keepMarkers)
-                if (path.Contains(keep, StringComparison.OrdinalIgnoreCase))
-                    return false;
-            return true;
-        }
-
-        var keptFiles = new List<PerfectWorldResEntry>(files.Count);
-        long deferredBytes = 0;
-        foreach (PerfectWorldResEntry entry in files)
-        {
-            if (IsDeferred(entry.Filename)) deferredBytes += entry.FileSize;
-            else keptFiles.Add(entry);
-        }
-
-        var keptPaks = new List<PerfectWorldPakEntry>(paks.Count);
-        foreach (PerfectWorldPakEntry pak in paks)
-        {
-            if (pak.Files.Count > 0 && pak.Files.All(f => IsDeferred(f.Filename)))
-                deferredBytes += pak.FileSize;
-            else
-                keptPaks.Add(pak);
-        }
-
-        int droppedFiles = files.Count - keptFiles.Count;
-        int droppedPaks = paks.Count - keptPaks.Count;
-        if (droppedFiles > 0 || droppedPaks > 0)
-            SharedStatic.InstanceLogger.LogInformation(
-                "[PerfectWorldInstaller] Deferred {GB:0.00} GB of on-demand content ({Files} files + {Paks} paks) the game downloads itself (e.g. per-language voice).",
-                deferredBytes / (1024.0 * 1024 * 1024), droppedFiles, droppedPaks);
-
-        return new ManifestBundle(keptFiles, keptPaks);
-    }
 
     /// <summary>
     ///     Brings the local install into exact agreement with the newest manifest: missing/mismatched files are
@@ -367,11 +299,6 @@ public partial class PerfectWorldGameInstaller
         // --- Completion ---------------------------------------------------------------------------------
         ReportProgress(totalBytes, totalCount, progressDelegate, force: true);
 
-        // Author the native pw_sdk patcher state so the game client accepts this directly-downloaded install
-        // (records the base build as installed, no voice) instead of looping on "更新失败". No-op unless the game
-        // opts in via PerfectWorldGameConfig.WritePatcherState.
-        await WritePatcherStateAsync(installPath, remote, bundle, token).ConfigureAwait(false);
-
         Manager.WriteInstalledResVersion(remote.ResVersion);
         progressStateDelegate?.Invoke(InstallProgressState.Completed);
 
@@ -485,81 +412,4 @@ public partial class PerfectWorldGameInstaller
         return output.ToArray();
     }
 
-    /// <summary>
-    ///     Returns the decoded remote catalog XML (<c>ResList.bin</c>) for <paramref name="resVersion"/>, reusing the
-    ///     copy retained by <see cref="GetManifestBundleAsync"/> when it is for the same version and otherwise
-    ///     fetching and decoding it afresh. Used by the patcher-state writer to copy per-file block checksums.
-    /// </summary>
-    private async Task<string> GetCatalogXmlAsync(string resVersion, CancellationToken token)
-    {
-        if (_cachedCatalogXml is { } cached && _cachedManifestVersion == resVersion)
-            return cached;
-
-        PerfectWorldGameConfig config = Manager.Config;
-        byte[] zipBytes = await DownloadBytesWithFallbackAsync(
-            cdn => config.BuildResListZipUrl(cdn, resVersion), token).ConfigureAwait(false);
-        byte[] resListBin = ExtractZipEntry(zipBytes, "ResList.bin");
-        return PatcherXml0.DecodeToXml(resListBin, config.AppId);
-    }
-
-    /// <summary>
-    ///     Writes the finalized native <c>pw_sdk PatcherSDK</c> state (<c>config.xml</c> + <c>ResList.xml</c> +
-    ///     <c>tmp/client.xml</c>) for the just-completed install/update when the game requires it (see
-    ///     <see cref="PerfectWorldGameConfig.WritePatcherState"/> and <see cref="PerfectWorldPatcherState"/>). The
-    ///     state records the installed base build together with the default-language voice section the plugin keeps,
-    ///     so the in-game client no longer sees a zero local version (which caused the "更新失败" loop), plays the
-    ///     default voice, and offers each deferred language for on-demand download. The flat <c>tmp/client.xml</c> is
-    ///     the client manifest the in-game updater re-reads on return to login; without it that updater sees an empty
-    ///     client list and loops on "更新失败" even when the launcher check passed. Best-effort: any failure is logged
-    ///     but does not fail the install — the downloaded files are all present and the state can be regenerated by a
-    ///     subsequent verify/repair — while genuine caller cancellation still propagates.
-    /// </summary>
-    private async Task WritePatcherStateAsync(string installPath, PerfectWorldRemoteConfig remote,
-        ManifestBundle bundle, CancellationToken token)
-    {
-        PerfectWorldGameConfig config = Manager.Config;
-        if (!config.WritePatcherState)
-            return;
-
-        try
-        {
-            string catalogXml = await GetCatalogXmlAsync(remote.ResVersion, token).ConfigureAwait(false);
-
-            string resListXml = PerfectWorldPatcherState.BuildLocalResListXml(
-                bundle.Files, bundle.Paks, catalogXml, remote.ResVersion, installPath,
-                out int resCount, out string tag, out var voiceSections, out string clientXml);
-            string configXml = PerfectWorldPatcherState.BuildLocalConfigXml(
-                config.GameResBranch, remote, tag, resCount, voiceSections);
-
-            string stateDir = Path.Combine(installPath, config.LauncherRootDirName, "UserData", "Patcher", "PatcherSDK");
-            Directory.CreateDirectory(stateDir);
-            string tmpDir = Path.Combine(stateDir, "tmp");
-            Directory.CreateDirectory(tmpDir);
-
-            string configPath = Path.Combine(stateDir, "config.xml");
-            string resListPath = Path.Combine(stateDir, "ResList.xml");
-            string clientPath = Path.Combine(tmpDir, "client.xml");
-
-            await File.WriteAllTextAsync(configPath, configXml, Utf8NoBom, token).ConfigureAwait(false);
-            byte[] resListEncoded = PatcherXml0.EncodeFromXml(resListXml, config.AppId);
-            await File.WriteAllBytesAsync(resListPath, resListEncoded, token).ConfigureAwait(false);
-            byte[] clientEncoded = PatcherXml0.EncodeFromXml(clientXml, config.AppId);
-            await File.WriteAllBytesAsync(clientPath, clientEncoded, token).ConfigureAwait(false);
-
-            // Remove any stale write-ahead ".tmp" backups so the patcher's crash-safe reader never prefers an
-            // outdated sibling over the state we just wrote.
-            ForceDeleteFile(configPath + ".tmp");
-            ForceDeleteFile(resListPath + ".tmp");
-            ForceDeleteFile(clientPath + ".tmp");
-
-            SharedStatic.InstanceLogger.LogInformation(
-                "[PerfectWorldInstaller] Wrote pw_sdk patcher state ({Count} base files, {Voice} installed voice section(s)) to {Dir}.",
-                resCount, voiceSections.Count, stateDir);
-        }
-        catch (Exception ex) when (!(ex is OperationCanceledException && token.IsCancellationRequested))
-        {
-            SharedStatic.InstanceLogger.LogWarning(
-                "[PerfectWorldInstaller] Failed to write pw_sdk patcher state: {Msg}", ex.Message);
-        }
-    }
 }

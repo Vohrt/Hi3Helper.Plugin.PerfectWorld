@@ -207,12 +207,24 @@ https://raw.githubusercontent.com/<owner>/Hi3Helper.Plugin.PerfectWorld/release/
 * **异环**（UE5，`HTGame.exe`）。启动器取自其自更新清单（`.../publish_ob/launcher/Version.ini` → `AllFiles.xml`），
   解压到 `NTELauncher\`（约 670 个各自 zip 压缩的文件，约 237 MB；清单里长度为 0 的条目带有错误的占位校验和，
   改用「是否为空」而非 MD5 来校验）；启动会以安装根目录作为工作目录运行 `NTELauncher\NTELauncher.exe`，
-  与官方「异环」快捷方式完全一致。「安装完成」需要同时具备 `HTGameBase.dll` 和 `NTELauncher.exe`。异环的启动器
-  会依据自身设置自动拉起游戏，因此无需额外的启动参数。
+  与官方「异环」快捷方式完全一致。「安装完成」需要同时具备 `HTGameBase.dll` 和 `NTELauncher.exe`。启动时会带上
+  `/autoplay` 参数，`NTELauncher.exe` 会将其原样转发给 `NTEGame.exe`，从而免去手动点击「开始游戏」直接自动进入
+  游戏。由于 `/autoplay` 会让 `NTEGame.exe` 跳过其进程内的资源更新器（也就是本应按需下载某种语音的环节），
+  插件会在安装/更新时**一次性下载异环的全部语音语言**（详见下文「已知问题」）。
 * **P5X**（Unity IL2CPP，`client\pc\P5X.exe`）。插件会带 `/launcher /directly /autoplay` 参数直接运行
   `P5XLaunch\P5XGame.exe`。其中 `/autoplay` 参数必不可少——P5X 的启动器是否自动进入游戏由*服务端*控制
   （`canAutoPlay=false`），仅改 INI 并不足够，否则会停在「开始游戏」按钮处。「安装完成」需要同时具备
   `GameAssembly.dll` 和 `P5XGame.exe`。
+
+**已知问题（异环）——插件会下载全部语音语言，而非仅一种。** 官方启动器只安装本体加一种默认（中文）语音，
+其余语言（日 / 英 / 韩）留给游戏内的更新器按需下载，因此官方全新安装会把这三种语言显示为带下载大小。而本插件会在
+安装/更新时**一次性下载全部四种**语音包，因此异环的安装体积比官方大约多 5 GB，且游戏内菜单会把每种语言都显示为
+已安装。这是刻意为之，且与上文的 `/autoplay` 直接相关：该参数虽能自动进入游戏，却会让 `NTEGame.exe` 跳过进程内的
+`GameResUpdaterAgent`——正是这个组件负责按需对账并下载语音，并初始化游戏内更新器的交接状态。早期版本曾尝试复刻
+官方做法：延迟下载非默认语音、去掉 `/autoplay`，并伪造原生 `PatcherSDK` 状态文件（`config.xml` / `ResList.xml` /
+`tmp\client.xml`），让游戏以为已装好一种语音并自行下载其余。该方案已被**放弃**：实测中，退回登录页后游戏会陷入
+「更新失败」死循环，并把每种语音语言都显示为没有大小（即认为它们都已安装），因为被跳过/喂养不足的更新器从未
+建立起有效的本地状态。改为一次性预先下载全部语音即可彻底规避该问题，代价是额外的磁盘与带宽占用。
 
 **已知问题（异环）——退出游戏后按钮可能会在一段时间内仍显示「游戏正在运行」。** 异环的官方启动器掌管着游戏进程的
 生命周期：当你关闭游戏时，它**并不会**立即结束 `HTGame.exe`，而是让该进程无窗口地空转，过一段时间后才回收。
