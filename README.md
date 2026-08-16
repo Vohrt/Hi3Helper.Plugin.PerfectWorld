@@ -118,23 +118,6 @@ publish folder:
 Indexer.exe Hi3Helper.Plugin.NTE\publish\Release
 ```
 
-### On GitHub (Actions)
-
-The **Release Plugin** workflow (`.github/workflows/release.yml`) does the whole thing on a
-`windows-latest` runner and publishes the zip to a GitHub Release. Trigger it from the *Actions* tab →
-*Release Plugin* → *Run workflow*, and provide:
-
-* **version** — e.g. `1.0.0` (also stamped into the assembly and the manifest)
-* **publish_profile** — defaults to `ReleasePublish-O2` (Speed); the `…NoReflection…` profiles build the
-  reflection-free variant
-
-The run publishes `NTE_<version>_API-<standardVersion>_<date>.zip` to a new release tagged
-`NTE@v<version>`, and also pushes the freshly-built `manifest.json` + `NTE.dll` onto the repo's `release`
-branch (under `NTE/`) so the in-launcher self-updater can pick them up (see
-[Automatic updates](#automatic-updates-self-update) below). No extra secrets are required — it uses the
-built-in `GITHUB_TOKEN`. The workflow currently builds the **NTE** plugin; **P5X** ships the same way (same
-publish profiles and Indexer) through an equivalent run.
-
 ## Installing into Collapse
 
 Copy the published output (the indexed `publish\Release` folder, containing the plugin DLL — `NTE.dll` or
@@ -264,32 +247,9 @@ listed every voice language *without* a size (i.e. it thought they were all alre
 skipped/under-seeded updater never established a valid local state. Bundling all voices up front sidesteps that
 entirely, at the cost of extra disk and bandwidth.
 
-**Design note (P5X) — why `/autoplay` is safe here, unlike NTE.** P5X does *not* have NTE's voice pitfall,
-because it splits its content across **two independent layers** and its optional voices live in the layer
-`/autoplay` can never touch:
-
-* **Base client (~1.1 GB, 125 files)** — managed by the same vendor `PatcherSDK` NTE uses (its on-disk
-  `config.xml` states `ResCount=125`, `ResSize=1155828821`). This is the Unity runtime, Lua, and a little base
-  CRIWare audio / opening CGs under `client\bin\Media\`. The plugin (like the official launcher) installs
-  exactly this layer; a fresh plugin install lands only ~1.1 GB.
-* **Game body (~80 GB)** — managed by the game's *own* Zeus engine under `client\OuterPackage\`, fetched
-  in-game via `HotFixTemp\DownloadTemp` the first time you enter. This includes all AssetBundles and the
-  **optional sub-packages**, among them the voice/localization packs `optlocalcn` (Chinese) and `optlocaljp`
-  (Japanese) under `client\OuterPackage\ZeusSetting\SubpackageReadyOptionalTag\`.
-
-The "开始游戏" button therefore does: `P5XGame.exe` (launcher) logs in → `GameClientAgent::launchGame` →
-`GameLifecycleMgr::startGame` → runs `client\pc\P5X.exe` (Unity) → Zeus downloads/verifies the ~80 GB
-OuterPackage and any opted-in sub-packages. `/autoplay` only auto-clicks that button (overriding the
-server-side `canAutoPlay=false`); it is forwarded to the *launcher*, not the Unity game, so it never bypasses
-the Zeus content updater. In short: **NTE puts voices in the launcher/PatcherSDK domain that `/autoplay`
-skips, whereas P5X puts them in the game-engine domain `/autoplay` cannot reach** — so P5X needs no
-voice-bundling workaround, and the plugin carries no `OuterPackage`/sub-package logic at all (the game handles
-it, exactly like the official launcher).
-
 **Launcher auto-click (DLL injection) — the default launch path.** Passing `/autoplay` auto-starts the game but
 has a side effect: on NTE it makes `NTEGame.exe` skip its in-process resource updater (the voice pitfall above).
-To avoid it, the plugin's **default** launch path presses the launcher's real "开始游戏" button programmatically
-instead:
+To avoid it, the plugin's **default** launch path presses the launcher's real "开始游戏" button programmatically:
 
 * **What is injected.** A tiny native helper, **`PwAutoClick.dll`** (x64, links the static CRT, depends only on
   `KERNEL32.dll`). Its source is in `Hi3Helper.PerfectWorld.Core/Native/PwAutoClick/`; the compiled DLL is
@@ -320,19 +280,6 @@ instead:
   `Native/PwAutoClick.dll` is committed and embedded as-is. If you change the C++ source, regenerate it from a
   shell with the *x64 Native Tools* environment by running
   `Hi3Helper.PerfectWorld.Core/Native/PwAutoClick/build.ps1` before rebuilding the plugin.
-* **Status.** Enabled by default for **both** games but **not yet verified in normal play** — if the game fails
-  to start, check `%TEMP%\PwAutoClick.log` and disable as above to fall back to `/autoplay`.
-
-**Known issue (NTE) — the button can stay on *game running* for a while after you quit.** NTE's vendor launcher
-owns the game process's lifetime: when you close the game it does **not** terminate `HTGame.exe` right away —
-it leaves the process running idle (with no window) and only reaps it some time later. This appears to be a
-quirk/bug of the official launcher itself (it is very slow to close the game process). Because the plugin
-tracks the real game process — the reliable signal that the game is actually up — Collapse keeps reporting
-**game running** until that process finally exits, so the button can take a while to return to *Start*. It
-**does** reset on its own once the process goes away; no action is required. If you want it back immediately,
-right-click the **异环** icon in the Windows system tray and choose exit — that force-closes the lingering
-game process at once. (The plugin deliberately does *not* kill the process early on its own, to avoid the risk
-of terminating a game that is merely still loading.)
 
 ## Credits & license
 
