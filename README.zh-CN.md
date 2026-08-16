@@ -206,21 +206,25 @@ https://raw.githubusercontent.com/<owner>/Hi3Helper.Plugin.PerfectWorld/release/
 
 * **异环**（UE5，`HTGame.exe`）。启动器取自其自更新清单（`.../publish_ob/launcher/Version.ini` → `AllFiles.xml`），
   解压到 `NTELauncher\`（约 670 个各自 zip 压缩的文件，约 237 MB；清单里长度为 0 的条目带有错误的占位校验和，
-  改用「是否为空」而非 MD5 来校验）；启动会以安装根目录作为工作目录运行 `NTELauncher\NTELauncher.exe`，
-  与官方「异环」快捷方式完全一致。「安装完成」需要同时具备 `HTGameBase.dll` 和 `NTELauncher.exe`。启动时会带上
-  `/autoplay` 参数，`NTELauncher.exe` 会将其原样转发给 `NTEGame.exe`，从而免去手动点击「开始游戏」直接自动进入
-  游戏。由于 `/autoplay` 会让 `NTEGame.exe` 跳过其进程内的资源更新器（也就是本应按需下载某种语音的环节），
-  插件会在安装/更新时**一次性下载异环的全部语音语言**（详见下文「已知问题」）。
-* **P5X**（Unity IL2CPP，`client\pc\P5X.exe`）。插件会带 `/launcher /directly /autoplay` 参数直接运行
-  `P5XLaunch\P5XGame.exe`。其中 `/autoplay` 参数必不可少——P5X 的启动器是否自动进入游戏由*服务端*控制
-  （`canAutoPlay=false`），仅改 INI 并不足够，否则会停在「开始游戏」按钮处。「安装完成」需要同时具备
-  `GameAssembly.dll` 和 `P5XGame.exe`。
+  改用「是否为空」而非 MD5 来校验）；启动会以安装根目录作为工作目录**直接运行** `NTELauncher\NTEGame.exe`——
+  而非那个薄壳 `NTELauncher.exe`（它只是定位补丁器后再拉起 `NTEGame.exe /launcher /directly`，插件把这一命令行
+  逐字复刻并省去这个多余的中间进程）。「安装完成」需要同时具备 `HTGameBase.dll` 和 `NTEGame.exe`。默认情况下插件
+  会通过 DLL 注入**自动点击**启动器的「开始游戏」按钮（见下文「启动器自动点击」）；若该方式不可用，则回退到传入
+  `/autoplay`——它能免手动点击自动进入游戏，但会让 `NTEGame.exe` 跳过其进程内的资源更新器。由于插件在 `/autoplay`
+  回退路径下也必须保持正确，它仍会在安装/更新时**一次性下载异环的全部语音语言**（详见下文「已知问题」）。
+* **P5X**（Unity IL2CPP，`client\pc\P5X.exe`）。插件会直接运行 `P5XLaunch\P5XGame.exe`。默认情况下通过 DLL 注入
+  **自动点击**「开始游戏」（见下文「启动器自动点击」）；回退方式为 `/launcher /directly /autoplay`。无论哪种方式，
+  关键都在于那一次点击：P5X 的启动器是否自动进入游戏由*服务端*控制（`canAutoPlay=false`），仅改 INI 并不足够，
+  否则会停在「开始游戏」按钮处——真实的按钮点击（自动点击）或 `/autoplay` 覆盖都能越过它。「安装完成」需要同时
+  具备 `GameAssembly.dll` 和 `P5XGame.exe`。
 
 **已知问题（异环）——插件会下载全部语音语言，而非仅一种。** 官方启动器只安装本体加一种默认（中文）语音，
 其余语言（日 / 英 / 韩）留给游戏内的更新器按需下载，因此官方全新安装会把这三种语言显示为带下载大小。而本插件会在
 安装/更新时**一次性下载全部四种**语音包，因此异环的安装体积比官方大约多 5 GB，且游戏内菜单会把每种语言都显示为
-已安装。这是刻意为之，且与上文的 `/autoplay` 直接相关：该参数虽能自动进入游戏，却会让 `NTEGame.exe` 跳过进程内的
-`GameResUpdaterAgent`——正是这个组件负责按需对账并下载语音，并初始化游戏内更新器的交接状态。早期版本曾尝试复刻
+已安装。这是刻意为之，且与上文的 `/autoplay` **回退路径**直接相关：该参数虽能自动进入游戏，却会让 `NTEGame.exe`
+跳过进程内的 `GameResUpdaterAgent`——正是这个组件负责按需对账并下载语音，并初始化游戏内更新器的交接状态。（默认的
+*自动点击*路径确实会让该更新器运行，但由于每种语音都已预装，它会发现无可下载——因此两种方式下游戏表现一致。）
+早期版本曾尝试复刻
 官方做法：延迟下载非默认语音、去掉 `/autoplay`，并伪造原生 `PatcherSDK` 状态文件（`config.xml` / `ResList.xml` /
 `tmp\client.xml`），让游戏以为已装好一种语音并自行下载其余。该方案已被**放弃**：实测中，退回登录页后游戏会陷入
 「更新失败」死循环，并把每种语音语言都显示为没有大小（即认为它们都已安装），因为被跳过/喂养不足的更新器从未
@@ -243,6 +247,36 @@ https://raw.githubusercontent.com/<owner>/Hi3Helper.Plugin.PerfectWorld/release/
 而非 Unity 游戏本体，因此绝不会绕过 Zeus 的内容更新器。一句话：**异环把配音放进了 `/autoplay` 会跳过的
 启动器 / PatcherSDK 域，而 P5X 把配音放进了 `/autoplay` 触及不到的游戏引擎域**——所以 P5X 无需任何「预装配音」的
 变通，插件也完全不含 `OuterPackage` / 子包相关逻辑（这部分交由游戏自身处理，与官方启动器完全一致）。
+
+**启动器自动点击（DLL 注入）——默认的启动方式。** 传入 `/autoplay` 虽能自动进入游戏，却有副作用：在异环上它会让
+`NTEGame.exe` 跳过其进程内的资源更新器（即上文的语音隐患），而且该参数历来与 MSI Afterburner 等叠加层工具存在冲突。
+为避免它，插件的**默认**启动方式改为以程序化方式点击启动器真正的「开始游戏」按钮：
+
+* **注入了什么。** 一个极小的原生辅助库 **`PwAutoClick.dll`**（x64，静态链接 CRT，仅依赖 `KERNEL32.dll`）。其源码位于
+  `Hi3Helper.PerfectWorld.Core/Native/PwAutoClick/`；编译好的 DLL 作为资源嵌入 `PerfectWorld.Core.dll`，启动时释放到
+  `%TEMP%\CollapsePwPlugin\`，再经 `CreateRemoteThread` + `LoadLibraryW` 载入官方启动器（`NTEGame.exe` / `P5XGame.exe`）。
+* **如何完成点击。** 两个启动器都是 Qt 5.15.17 应用，其开始按钮运行 QML 槽
+  `BackgroudStageScheduler.gameActionBtnClicked()`（厂商拼写——第二个 *n* 确实缺失）。`BackgroudStageScheduler` 是一个
+  通过 `QQmlContext::setContextProperty(const QString&, QObject*)` 暴露给 QML 的 C++ `QObject`。该 DLL 通过 IAT 挂钩这个
+  Qt 导出来捕获对象指针；随后，一旦启动器日志出现 `all ready, wait for start game`（插件会读取启动器日志并置位一个
+  DLL 正在等待的具名 `Event`），它便调用 `QMetaObject::invokeMethod(obj, "gameActionBtnClicked", Qt::QueuedConnection)`
+  在启动器的 GUI 线程上触发点击。这样启动器会走它**正常**的流程——包含资源检查——与手动点击完全一致，不带任何
+  `/autoplay` 捷径。
+* **需要管理员权限。** 官方启动器被强制以管理员运行，因此注入它也需要 Collapse 同样以管理员运行；否则会跳过自动点击，
+  改用 `/autoplay` 回退。
+* **回退阶梯（绝不会让你卡住）。** 若自动点击无法启用（Collapse 非管理员，或嵌入的 DLL 无法准备），插件改用旧的
+  `/autoplay` 路径。若*尝试*注入但失败，则启动器以**不带** `/autoplay` 的方式启动、并保留其窗口可见，好让你自己点击
+  「开始游戏」。若注入成功但点击始终未触发，正常的「超时显示窗口」机制仍会把窗口显示出来供手动点击。
+* **诊断信息。** 该 DLL 会写入 `%TEMP%\PwAutoClick.log`（符号解析、挂钩数量、对象捕获、`invokeMethod` 结果）；插件则以
+  `[PWAutoClick]` 前缀记录注入状态。两者均可安全删除。
+* **如何关闭 / 回退。** 在对应游戏的预设（`NteCnPresetConfig.cs` / `P5xCnPresetConfig.cs`）中设 `LauncherAutoClickEnabled =
+  false` 并重新编译，即可强制使用已验证的 `/autoplay` 行为。用户自定义的启动参数也会自动关闭自动点击（你的参数会被
+  原样使用）。
+* **编译原生 DLL。** 普通的插件编译**无需** C++ 工具链——已提交的 `Native/PwAutoClick.dll` 会被原样嵌入。若你修改了
+  C++ 源码，请在具备 *x64 Native Tools* 环境的命令行中运行 `Hi3Helper.PerfectWorld.Core/Native/PwAutoClick/build.ps1`
+  重新生成它，然后再编译插件。
+* **状态。** 两款游戏均默认开启，但**尚未在正常游玩中验证**——若游戏无法启动，请查看 `%TEMP%\PwAutoClick.log`，并按
+  上文关闭以回退到 `/autoplay`。
 
 **已知问题（异环）——退出游戏后按钮可能会在一段时间内仍显示「游戏正在运行」。** 异环的官方启动器掌管着游戏进程的
 生命周期：当你关闭游戏时，它**并不会**立即结束 `HTGame.exe`，而是让该进程无窗口地空转，过一段时间后才回收。

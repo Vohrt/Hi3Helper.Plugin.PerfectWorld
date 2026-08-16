@@ -150,6 +150,65 @@ public sealed class PerfectWorldGameConfig
     public (string Key, string Value)[] LauncherSilentSettings { get; init; } =
         [("autoLogin", "1"), ("autoRun", "1"), ("quitWithGame", "1"), ("showAfterGameQuit", "0")];
 
+    // ---------------------------------------------------------------------------------------------------------------
+    // Auto-click (DLL-injection) launch path — an alternative to the vendor "/autoplay" flag.
+    //
+    //   Background: passing "/autoplay" on the launcher command line makes it SKIP its in-process resource check
+    //   (GameClientAgent::beginCheckGameResVersion). For 异环/NTE that skip corrupts the per-language voice state, so
+    //   with "/autoplay" the plugin has to bundle every voice language up front (~5 GB extra). Pressing the launcher's
+    //   own "开始游戏" button instead runs the normal ready-check first (exactly like a human click), so on-demand voice
+    //   works and only the default language need be shipped.
+    //
+    //   When enabled AND the host is elevated, the plugin injects a tiny helper DLL (PwAutoClick.dll) into the Qt
+    //   launcher, waits for the launcher to reach its "ready to start" log marker, then invokes the button's slot via
+    //   Qt meta-object reflection. If injection cannot activate (not elevated, DLL missing) the plugin falls back to
+    //   the "/autoplay" path below, preserving today's behaviour.
+    // ---------------------------------------------------------------------------------------------------------------
+
+    /// <summary>
+    ///     When <see langword="true"/> and the host runs elevated, the plugin drives the launcher's "开始游戏" button
+    ///     programmatically (via injected <c>PwAutoClick.dll</c> + Qt meta-object invocation) instead of relying on the
+    ///     vendor "/autoplay" flag. This runs the launcher's normal resource/voice reconciliation before starting the
+    ///     game. Requires <see cref="SilentLaunch"/> and <see cref="LauncherBootstrapperRelativePath"/> to point at the
+    ///     Qt launcher executable. Falls back to <see cref="LaunchArguments"/> when it cannot activate.
+    /// </summary>
+    public bool LauncherAutoClickEnabled { get; init; }
+
+    /// <summary>
+    ///     Command-line arguments used instead of <see cref="LaunchArguments"/> when the auto-click path is active,
+    ///     e.g. <c>/launcher /directly</c> (deliberately WITHOUT <c>/autoplay</c> so the launcher runs its resource
+    ///     check and then waits at the "ready to start" state for our injected click).
+    /// </summary>
+    public string LaunchArgumentsAutoClick { get; init; } = string.Empty;
+
+    /// <summary>
+    ///     Substring that, when found in the launcher log during an auto-click launch, means the launcher has finished
+    ///     its resource check/login and is parked waiting for the "开始游戏" button — the moment it is safe to fire the
+    ///     injected click. Shared pw_sdk marker (<c>GameClientAgent::onGameElementUpdateFinished</c> logs it).
+    /// </summary>
+    public string LauncherAutoClickReadyLogMarker { get; init; } = "all ready, wait for start game";
+
+    /// <summary>
+    ///     Name of the QObject the launcher exposes to its QML UI via <c>QQmlContext::setContextProperty</c> and on
+    ///     which the play button's slot lives. The play button QML is <c>onClicked: {obj}.gameActionBtnClicked()</c>.
+    ///     Note the vendor's spelling (missing an 'n'): <c>BackgroudStageScheduler</c>.
+    /// </summary>
+    public string LauncherAutoClickContextObjectName { get; init; } = "BackgroudStageScheduler";
+
+    /// <summary>
+    ///     Q_INVOKABLE/slot name on <see cref="LauncherAutoClickContextObjectName"/> that the injected DLL calls to
+    ///     press the play button, e.g. <c>gameActionBtnClicked</c>.
+    /// </summary>
+    public string LauncherAutoClickMethodName { get; init; } = "gameActionBtnClicked";
+
+    /// <summary>
+    ///     Launcher settings written for the auto-click path (used instead of <see cref="LauncherSilentSettings"/> when
+    ///     auto-click is active). Typically identical except <c>autoRun=0</c>, so ONLY the injected click starts the
+    ///     game — deterministic single start, no race with the launcher auto-starting itself. Empty falls back to
+    ///     <see cref="LauncherSilentSettings"/>.
+    /// </summary>
+    public (string Key, string Value)[] LauncherAutoClickSilentSettings { get; init; } = [];
+
     private string PrimaryGameResCdn =>
         GameResCdnUrls is { Length: > 0 } ? GameResCdnUrls[0].TrimEnd('/') : string.Empty;
 

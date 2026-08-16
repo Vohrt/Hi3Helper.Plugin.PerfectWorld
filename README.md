@@ -231,25 +231,32 @@ The per-game specifics differ:
 * **NTE** (UE5, `HTGame.exe`). The launcher is fetched from its self-update manifest
   (`.../publish_ob/launcher/Version.ini` → `AllFiles.xml`) and inflated into `NTELauncher\` (~670 individually
   zip-compressed files, ≈237 MB; zero-length entries carry a bogus placeholder checksum and are validated by
-  emptiness instead of MD5); launch runs `NTELauncher\NTELauncher.exe` with the working directory set to the
-  install root, exactly like the official 异环 shortcut. A finished install needs both `HTGameBase.dll` and
-  `NTELauncher.exe`. Launch passes `/autoplay`, which `NTELauncher.exe` forwards verbatim to `NTEGame.exe` so
-  the game auto-starts without a manual "开始游戏" click. Because `/autoplay` makes `NTEGame.exe` skip its
-  in-process resource updater — the step that would otherwise fetch a voice language on demand — the plugin
-  downloads **all** of NTE's voice languages up front at install/update time (see *Known issues* below).
-* **P5X** (Unity IL2CPP, `client\pc\P5X.exe`). The plugin launches `P5XLaunch\P5XGame.exe` directly with
-  `/launcher /directly /autoplay`. The `/autoplay` flag is essential — P5X's launcher gates auto-play off
-  *server-side* (`canAutoPlay=false`), so patching the INI alone is not enough and it would otherwise stop at
-  the "开始游戏" button. A finished install needs both `GameAssembly.dll` and `P5XGame.exe`.
+  emptiness instead of MD5); launch runs `NTELauncher\NTEGame.exe` **directly** — not the thin
+  `NTELauncher.exe` shim, which merely relocates the patcher then spawns `NTEGame.exe /launcher /directly`, so
+  the plugin reproduces that byte-for-byte and drops the redundant intermediary — with the working directory set
+  to the install root. A finished install needs both `HTGameBase.dll` and `NTEGame.exe`. By default the plugin
+  presses the launcher's "开始游戏" button via DLL-injection **auto-click** (see *Launcher auto-click* below); if
+  that is unavailable it falls back to passing `/autoplay`, which auto-starts the game without a manual click but
+  makes `NTEGame.exe` skip its in-process resource updater. Because the plugin must stay correct on the
+  `/autoplay` fallback too, it still downloads **all** of NTE's voice languages up front at install/update time
+  (see *Known issues* below).
+* **P5X** (Unity IL2CPP, `client\pc\P5X.exe`). The plugin launches `P5XLaunch\P5XGame.exe` directly. By default
+  it presses "开始游戏" via DLL-injection **auto-click** (see *Launcher auto-click* below); the fallback is
+  `/launcher /directly /autoplay`. Either way the click is what matters: P5X's launcher gates auto-play off
+  *server-side* (`canAutoPlay=false`), so patching the INI alone is not enough and it would otherwise stop at the
+  "开始游戏" button — a real button press (auto-click) or the `/autoplay` override both get past it. A finished
+  install needs both `GameAssembly.dll` and `P5XGame.exe`.
 
 **Known issue (NTE) — every voice language is downloaded, not just one.** The official launcher installs the
 base game plus a single default (Chinese) voice and lets the in-game updater fetch the other languages
 (Japanese / English / Korean) on demand, so a fresh official install lists those three with a download size.
 The plugin instead ships **all four** voice packs at install/update time, so an NTE install is ~5 GB larger
 than the official one and the in-game menu shows every language as already installed. This is deliberate and
-tied to `/autoplay` (above): that flag auto-starts the game but makes `NTEGame.exe` skip the in-process
-`GameResUpdaterAgent` — the very component that reconciles/downloads voices on demand and seeds the in-game
-updater's hand-off state. An earlier version tried to mirror the official launcher — defer the non-default
+tied to the `/autoplay` **fallback** (above): that flag auto-starts the game but makes `NTEGame.exe` skip the
+in-process `GameResUpdaterAgent` — the very component that reconciles/downloads voices on demand and seeds the
+in-game updater's hand-off state. (The default *auto-click* path does let that updater run, but because every
+voice is already bundled it finds nothing to fetch — so the game behaves the same either way.) An earlier
+version tried to mirror the official launcher — defer the non-default
 voices, drop `/autoplay`, and forge the native `PatcherSDK` state files (`config.xml` / `ResList.xml` /
 `tmp\client.xml`) so the game would believe one voice was installed and fetch the rest itself. It was
 **abandoned**: in practice the game looped on "更新失败" (update failed) after returning to the login screen and
@@ -278,6 +285,43 @@ the Zeus content updater. In short: **NTE puts voices in the launcher/PatcherSDK
 skips, whereas P5X puts them in the game-engine domain `/autoplay` cannot reach** — so P5X needs no
 voice-bundling workaround, and the plugin carries no `OuterPackage`/sub-package logic at all (the game handles
 it, exactly like the official launcher).
+
+**Launcher auto-click (DLL injection) — the default launch path.** Passing `/autoplay` auto-starts the game but
+has side effects: on NTE it makes `NTEGame.exe` skip its in-process resource updater (the voice pitfall above),
+and the flag has historically clashed with overlay tools such as MSI Afterburner. To avoid it, the plugin's
+**default** launch path presses the launcher's real "开始游戏" button programmatically instead:
+
+* **What is injected.** A tiny native helper, **`PwAutoClick.dll`** (x64, links the static CRT, depends only on
+  `KERNEL32.dll`). Its source is in `Hi3Helper.PerfectWorld.Core/Native/PwAutoClick/`; the compiled DLL is
+  embedded into `PerfectWorld.Core.dll` as a resource, extracted to `%TEMP%\CollapsePwPlugin\` at launch and
+  loaded into the vendor launcher (`NTEGame.exe` / `P5XGame.exe`) via `CreateRemoteThread` + `LoadLibraryW`.
+* **How the click is made.** Both launchers are Qt 5.15.17 apps whose play button runs the QML slot
+  `BackgroudStageScheduler.gameActionBtnClicked()` (vendor spelling — the second *n* really is missing).
+  `BackgroudStageScheduler` is a C++ `QObject` exposed to QML via
+  `QQmlContext::setContextProperty(const QString&, QObject*)`. The DLL IAT-hooks that Qt export to capture the
+  object pointer; then, once the launcher logs `all ready, wait for start game` (the plugin tails the launcher
+  log and sets a named `Event` the DLL waits on), it calls
+  `QMetaObject::invokeMethod(obj, "gameActionBtnClicked", Qt::QueuedConnection)` to fire the click on the
+  launcher's GUI thread. This runs the launcher's **normal** flow — resource check included — exactly as a
+  manual click would, with no `/autoplay` shortcut.
+* **Requires administrator.** The vendor launcher is force-elevated, so injecting into it needs Collapse to run
+  elevated too; when it doesn't, auto-click is skipped and the `/autoplay` fallback is used.
+* **Fallback ladder (you are never left stuck).** If auto-click can't activate (Collapse not elevated, or the
+  embedded DLL can't be prepared) the plugin uses the old `/autoplay` path. If injection is *attempted* but
+  fails, the launcher is started **without** `/autoplay` and its window is left visible so you can click
+  "开始游戏" yourself. If injection succeeds but the click never fires, the normal reveal-timeout still surfaces
+  the window for a manual click.
+* **Diagnostics.** The DLL writes `%TEMP%\PwAutoClick.log` (symbol resolution, hook count, object capture, the
+  `invokeMethod` result); the plugin logs `[PWAutoClick]` lines for injection status. Both are safe to delete.
+* **To disable / revert.** Set `LauncherAutoClickEnabled = false` in the game's preset (`NteCnPresetConfig.cs` /
+  `P5xCnPresetConfig.cs`) and rebuild to force the proven `/autoplay` behaviour. A user-supplied custom launch
+  argument also disables auto-click automatically (your argument is honoured verbatim).
+* **Building the native DLL.** A normal plugin build needs **no** C++ toolchain — the prebuilt
+  `Native/PwAutoClick.dll` is committed and embedded as-is. If you change the C++ source, regenerate it from a
+  shell with the *x64 Native Tools* environment by running
+  `Hi3Helper.PerfectWorld.Core/Native/PwAutoClick/build.ps1` before rebuilding the plugin.
+* **Status.** Enabled by default for **both** games but **not yet verified in normal play** — if the game fails
+  to start, check `%TEMP%\PwAutoClick.log` and disable as above to fall back to `/autoplay`.
 
 **Known issue (NTE) — the button can stay on *game running* for a while after you quit.** NTE's vendor launcher
 owns the game process's lifetime: when you close the game it does **not** terminate `HTGame.exe` right away —

@@ -74,7 +74,17 @@ public partial class P5xCnPresetConfig : PluginPresetConfigBase
         LauncherLogRelativePath          = @"UserData\Log\P5XGame.log",
         // P5X publishes no dynamic bgimgs/ folder (unlike 异环); its home key-visual lives inside the installed
         // vendor 'qres' resource pack. The media provider extracts the background from this pack post-install.
-        LocalBackgroundResPackRelativePath = @"P5XLaunch\ResData\1264.dat"
+        LocalBackgroundResPackRelativePath = @"P5XLaunch\ResData\1264.dat",
+        // ---- DLL-injection auto-click launch path (ON by default; see README "P5X auto-click") ----
+        // Symmetric to 异环: when enabled AND elevated, the plugin injects PwAutoClick.dll into P5XGame.exe and invokes
+        // the same "gameActionBtnClicked" slot on the shared "BackgroudStageScheduler" context object once P5XGame logs
+        // "all ready, wait for start game", instead of "/autoplay". P5X gates auto-play OFF server-side, but a real
+        // button press bypasses that gate exactly like a manual click. Set to false to fall back to the older
+        // "/autoplay" flow. Also auto-falls-back to "/autoplay" (not elevated / DLL missing) or a visible launcher for a
+        // manual click (injection failed).
+        LauncherAutoClickEnabled            = true,
+        LaunchArgumentsAutoClick            = "/launcher /directly",
+        LauncherAutoClickSilentSettings     = [("autoLogin", "1"), ("autoRun", "0"), ("quitWithGame", "1"), ("showAfterGameQuit", "0")]
     };
 
     private static readonly PerfectWorldNewsConfig P5xNewsConfig = new()

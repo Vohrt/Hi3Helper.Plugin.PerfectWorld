@@ -46,4 +46,15 @@
         <ProjectReference Include="..\SharpHDiffPatch.Core\SharpHDiffPatch.Core\SharpHDiffPatch.Core.csproj"/>
     </ItemGroup>
 
+    <ItemGroup>
+        <!-- Prebuilt native helper that presses the vendor launcher's "开始游戏" button via DLL injection + Qt
+             meta-object invocation (see Native\PwAutoClick\PwAutoClick.cpp and its build.ps1). It is committed as a
+             binary (like Indexer.exe) and embedded so the plugin can extract and inject it at runtime with no extra
+             files to ship. The Condition keeps the managed build working even if the DLL has not been compiled yet;
+             LauncherAutoClickSession then simply reports the resource missing and falls back to the "/autoplay" path. -->
+        <EmbeddedResource Include="Native\PwAutoClick.dll" Condition="Exists('Native\PwAutoClick.dll')">
+            <LogicalName>PwAutoClick.dll</LogicalName>
+        </EmbeddedResource>
+    </ItemGroup>
+
 </Project>

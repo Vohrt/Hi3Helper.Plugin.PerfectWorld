@@ -71,12 +71,20 @@ public sealed partial class PerfectWorldGameLauncher
 
                 try
                 {
-                    // Patch the vendor launcher's own settings so it auto-logs-in, auto-starts the game and quits
-                    // together with the game. This is what removes the manual "Start" click and stops the launcher
-                    // from reappearing after the game exits. It works regardless of elevation (the elevated launcher
-                    // reads these settings itself), so it is the primary silencing mechanism.
+                    // Patch the vendor launcher's own settings so it auto-logs-in and quits together with the game.
+                    // The auto-click path uses its own settings set (typically autoRun=0, so only the injected click
+                    // starts the game); the "/autoplay" path uses the default set. This is what removes the manual
+                    // "Start" click and stops the launcher from reappearing after the game exits. It works regardless
+                    // of elevation (the elevated launcher reads these settings itself), so it is the primary silencing
+                    // mechanism.
                     if (silent && !string.IsNullOrEmpty(silentPlan!.SettingsIniPath))
-                        PatchLauncherSettings(silentPlan.SettingsIniPath, silentPlan.Config);
+                    {
+                        var settings = silentPlan.AutoClick is not null
+                                       && silentPlan.Config.LauncherAutoClickSilentSettings.Length > 0
+                            ? silentPlan.Config.LauncherAutoClickSilentSettings
+                            : silentPlan.Config.LauncherSilentSettings;
+                        PatchLauncherSettings(silentPlan.SettingsIniPath, silentPlan.Config, settings);
+                    }
 
                     long launcherLogStartLength =
                         silent ? GetLauncherLogLength(silentPlan!.LauncherDir, silentPlan.Config) : 0;
@@ -102,10 +110,16 @@ public sealed partial class PerfectWorldGameLauncher
                         SharedStatic.InstanceLogger.LogError(e, "[PWLauncher::LaunchGame] Failed to set process priority.");
                     }
 
+                    // Inject the auto-click helper as early as possible (well before the launcher creates its QML view,
+                    // so the DLL's IAT hook captures the context object). The DLL then waits until we signal readiness.
+                    var autoClickInjected = false;
+                    if (silent && silentPlan!.AutoClick is not null)
+                        autoClickInjected = silentPlan.AutoClick.Inject(process.Id);
+
                     _ = ReadGameLog(context, token);
 
                     if (silent)
-                        await DriveLauncherSilentlyAsync(silentPlan!, launcherLogStartLength, token);
+                        await DriveLauncherSilentlyAsync(silentPlan!, launcherLogStartLength, autoClickInjected, token);
                     else
                         await process.WaitForExitAsync(token);
 
@@ -113,7 +127,11 @@ public sealed partial class PerfectWorldGameLauncher
                 }
                 finally
                 {
-                    if (silent) _silentLaunchSessionActive = false;
+                    if (silent)
+                    {
+                        _silentLaunchSessionActive = false;
+                        silentPlan!.AutoClick?.Dispose();
+                    }
                 }
             }
         }
@@ -301,10 +319,38 @@ public sealed partial class PerfectWorldGameLauncher
                 usingBootstrapper = true;
                 startingExecutablePath = bootstrapperPath;
                 workingDirectory = gamePath;
-                if (string.IsNullOrEmpty(effectiveArgument))
-                    effectiveArgument = config.LaunchArguments;
             }
         }
+
+        // A silent launch is only meaningful when going through the vendor launcher: it is the launcher (not the
+        // game) whose window/flow we are hiding. When we launch the game directly there is nothing extra to hide.
+        var silent = usingBootstrapper && config.SilentLaunch;
+
+        // Decide the launch path: DLL-injection auto-click (presses the launcher's real "开始游戏" button after its
+        // resource check) vs. the vendor "/autoplay" flag. Auto-click needs an elevated host (the launcher is
+        // force-elevated, so injecting into it requires it too) and its own non-"/autoplay" argument set. It is only
+        // meaningful when we control the launcher's arguments, so a caller-supplied custom argument disables it (we
+        // honour that argument verbatim instead). If the helper DLL / ready-event cannot be prepared we transparently
+        // fall back to the "/autoplay" path.
+        LauncherAutoClickSession? autoClick = null;
+        if (silent && string.IsNullOrEmpty(effectiveArgument)
+            && config.LauncherAutoClickEnabled && !string.IsNullOrEmpty(config.LaunchArgumentsAutoClick)
+            && IsProcessElevated() && LauncherAutoClickSession.TryCreate(config, out autoClick) && autoClick is not null)
+        {
+            SharedStatic.InstanceLogger.LogInformation(
+                "[PWLauncher::LaunchGame] Auto-click launch path active (DLL injection); DLL log: {Log}",
+                autoClick.DllLogPath);
+        }
+        else
+        {
+            autoClick?.Dispose();
+            autoClick = null;
+        }
+
+        // Argument selection: honour a caller-supplied argument first; otherwise use the auto-click argument set
+        // (no "/autoplay") when auto-click is active, or the default "/autoplay" arguments otherwise.
+        if (usingBootstrapper && string.IsNullOrEmpty(effectiveArgument))
+            effectiveArgument = autoClick is not null ? config.LaunchArgumentsAutoClick : config.LaunchArguments;
 
         var startInfo = string.IsNullOrEmpty(effectiveArgument)
             ? new ProcessStartInfo(startingExecutablePath)
@@ -313,20 +359,26 @@ public sealed partial class PerfectWorldGameLauncher
         startInfo.WorkingDirectory = workingDirectory;
         startInfo.UseShellExecute = false;
 
+        // Hand the auto-click configuration to the launcher-to-be through inherited environment variables.
+        autoClick?.PopulateEnvironment(startInfo.Environment);
+
         process = new Process
         {
             StartInfo = startInfo
         };
 
-        // A silent launch is only meaningful when going through the vendor launcher: it is the launcher (not the
-        // game) whose window/flow we are hiding. When we launch the game directly there is nothing extra to hide.
-        if (usingBootstrapper && config.SilentLaunch)
+        if (silent)
         {
             var launcherDir = Path.GetDirectoryName(Path.Combine(gamePath, bootstrapperRelativePath!)) ?? gamePath;
             var settingsIniPath = string.IsNullOrEmpty(config.LauncherSettingsIniRelativePath)
                 ? string.Empty
                 : Path.Combine(gamePath, config.LauncherSettingsIniRelativePath);
-            silentPlan = new SilentLaunchPlan(launcherDir, gameExecutablePath, settingsIniPath, config);
+            silentPlan = new SilentLaunchPlan(launcherDir, gameExecutablePath, settingsIniPath, config, autoClick);
+        }
+        else
+        {
+            // Auto-click is only ever created on the silent path, but guard against leaking the session/event handle.
+            autoClick?.Dispose();
         }
 
         return true;
@@ -389,27 +441,43 @@ public sealed partial class PerfectWorldGameLauncher
     ///     Everything needed to silence the vendor launcher for a single launch: where the launcher lives, which game
     ///     binary to track, which settings file to patch and the per-game silent-launch configuration.
     /// </summary>
-    private sealed record SilentLaunchPlan(string LauncherDir, string GameExePath, string SettingsIniPath, PerfectWorldGameConfig Config);
+    private sealed record SilentLaunchPlan(string LauncherDir, string GameExePath, string SettingsIniPath,
+        PerfectWorldGameConfig Config, LauncherAutoClickSession? AutoClick);
 
     /// <summary>
     ///     Drives a silent launch through the vendor launcher. The launcher's own settings (already patched before
-    ///     start) make it auto-login, auto-start the game and quit together with the game. On top of that, when
-    ///     Collapse itself runs elevated, the launcher's start-up window is hidden until the game appears (revealed
-    ///     early only if the log reports that an interactive login is required, or after a timeout). We always track
-    ///     the GAME process, because the thin bootstrapper exits within a second of spawning the elevated launcher.
+    ///     start) make it auto-login and quit together with the game. The game is started either by the vendor
+    ///     "/autoplay" flag or, on the auto-click path, by the injected helper DLL pressing the real "开始游戏" button
+    ///     once we signal that the launcher reached its ready state. On top of that, when Collapse itself runs elevated,
+    ///     the launcher's start-up window is hidden until the game appears (revealed early only if the log reports that
+    ///     an interactive login is required, or after a timeout). We always track the GAME process, because the thin
+    ///     bootstrapper exits within a second of spawning the elevated launcher.
     /// </summary>
     private static async Task DriveLauncherSilentlyAsync(SilentLaunchPlan plan, long launcherLogStartLength,
-        CancellationToken token)
+        bool autoClickInjected, CancellationToken token)
     {
         var baseNames = plan.Config.LauncherProcessBaseNames ?? [];
         var elevated = IsProcessElevated();
+
+        var autoClickActive = plan.AutoClick is not null && autoClickInjected;
+        // If auto-click was requested but injection failed, the launcher was started WITHOUT "/autoplay", so it will
+        // park at the "开始游戏" button. Keep its window visible so the user can press it themselves (still the
+        // correct on-demand-voice flow) instead of hiding a launcher that will never auto-start.
+        var autoClickInjectionFailed = plan.AutoClick is not null && !autoClickInjected;
+
+        // Fire the injected click once the launcher's log shows it is ready to start the game.
+        using var signalCts = CancellationTokenSource.CreateLinkedTokenSource(token);
+        var signalTask = Task.CompletedTask;
+        if (autoClickActive)
+            signalTask = Task.Run(() => WatchForReadyAndSignalAsync(plan, launcherLogStartLength, signalCts.Token),
+                CancellationToken.None);
 
         // Window hiding is only possible when we can actually touch the launcher's (elevated) windows, i.e. when the
         // host is elevated too. Otherwise we degrade gracefully: the settings patch still removes the manual "Start"
         // click and the after-exit reappearance, the launcher merely flashes during start-up/auto-login.
         using var hideCts = CancellationTokenSource.CreateLinkedTokenSource(token);
         var hideTask = Task.CompletedTask;
-        if (elevated && baseNames.Length > 0)
+        if (elevated && baseNames.Length > 0 && !autoClickInjectionFailed)
         {
             var revealTimeout = plan.Config.LauncherStartupRevealTimeoutSeconds > 0
                 ? plan.Config.LauncherStartupRevealTimeoutSeconds
@@ -420,9 +488,11 @@ public sealed partial class PerfectWorldGameLauncher
 
         Process? game = await WaitForGameAppearOrAbortAsync(plan.GameExePath, plan.LauncherDir, baseNames, token);
 
-        // Stop hiding once the game is up (it now covers the screen) or if we gave up waiting.
+        // Stop hiding/signalling once the game is up (it now covers the screen) or if we gave up waiting.
         hideCts.Cancel();
+        signalCts.Cancel();
         try { await hideTask; } catch { /* best-effort */ }
+        try { await signalTask; } catch { /* best-effort */ }
 
         if (game is null)
         {
@@ -628,35 +698,72 @@ public sealed partial class PerfectWorldGameLauncher
     private static bool LauncherNeedsReveal(string launcherDir, long launcherLogStartLength,
         PerfectWorldGameConfig config)
     {
+        var text = ReadLauncherLogFrom(launcherDir, launcherLogStartLength, config);
+        if (text.Length == 0) return false;
+
+        foreach (var marker in config.LoginNeededLogMarkers)
+        {
+            if (!string.IsNullOrEmpty(marker) && text.Contains(marker, StringComparison.Ordinal))
+                return true;
+        }
+
+        foreach (var marker in config.LauncherAttentionLogMarkers)
+        {
+            if (!string.IsNullOrEmpty(marker) && text.Contains(marker, StringComparison.Ordinal))
+                return true;
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    ///     Reads the launcher log from <paramref name="launcherLogStartLength"/> to the end, tolerating truncation or
+    ///     rotation (reads from 0 if the file shrank). Returns an empty string on any error.
+    /// </summary>
+    private static string ReadLauncherLogFrom(string launcherDir, long launcherLogStartLength,
+        PerfectWorldGameConfig config)
+    {
         try
         {
             var logPath = Path.Combine(launcherDir, config.LauncherLogRelativePath);
-            if (!File.Exists(logPath)) return false;
+            if (!File.Exists(logPath)) return string.Empty;
 
             using var fs = new FileStream(logPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
             var from = fs.Length < launcherLogStartLength ? 0 : launcherLogStartLength;
             fs.Seek(from, SeekOrigin.Begin);
 
             using var reader = new StreamReader(fs, Encoding.Latin1);
-            var text = reader.ReadToEnd();
-
-            foreach (var marker in config.LoginNeededLogMarkers)
-            {
-                if (!string.IsNullOrEmpty(marker) && text.Contains(marker, StringComparison.Ordinal))
-                    return true;
-            }
-
-            foreach (var marker in config.LauncherAttentionLogMarkers)
-            {
-                if (!string.IsNullOrEmpty(marker) && text.Contains(marker, StringComparison.Ordinal))
-                    return true;
-            }
-
-            return false;
+            return reader.ReadToEnd();
         }
         catch
         {
-            return false;
+            return string.Empty;
+        }
+    }
+
+    /// <summary>
+    ///     Polls the launcher log until the "ready to start game" marker appears, then signals the injected auto-click
+    ///     DLL to press the button. Returns once it has signalled, or when cancelled (the game appeared, or the launch
+    ///     was aborted). If the marker never appears the DLL is never released and the reveal-timeout fallback shows the
+    ///     launcher for a manual click.
+    /// </summary>
+    private static async Task WatchForReadyAndSignalAsync(SilentLaunchPlan plan, long launcherLogStartLength,
+        CancellationToken token)
+    {
+        var marker = plan.Config.LauncherAutoClickReadyLogMarker;
+        if (plan.AutoClick is null || string.IsNullOrEmpty(marker)) return;
+
+        while (!token.IsCancellationRequested)
+        {
+            var text = ReadLauncherLogFrom(plan.LauncherDir, launcherLogStartLength, plan.Config);
+            if (text.Contains(marker, StringComparison.Ordinal))
+            {
+                plan.AutoClick.SignalReady();
+                return;
+            }
+
+            try { await Task.Delay(500, token); }
+            catch { return; }
         }
     }
 
@@ -674,16 +781,17 @@ public sealed partial class PerfectWorldGameLauncher
     }
 
     /// <summary>
-    ///     Patches the launcher's user-writable, non-integrity-checked settings file so the launcher silences itself
-    ///     (auto-login, auto-run, quit-with-game, no reappearance — as described by
-    ///     <see cref="PerfectWorldGameConfig.LauncherSilentSettings"/>). All other content is preserved
-    ///     byte-for-byte. The file is plain ASCII, so ISO-8859-1/Latin1 round-trips it exactly.
+    ///     Patches the launcher's user-writable, non-integrity-checked settings file with the supplied
+    ///     <paramref name="settings"/> so the launcher silences itself (auto-login, quit-with-game, no reappearance —
+    ///     and, depending on the launch path, either auto-run or wait for the injected click). All other content is
+    ///     preserved byte-for-byte. The file is plain ASCII, so ISO-8859-1/Latin1 round-trips it exactly.
     /// </summary>
-    private static void PatchLauncherSettings(string settingsIniPath, PerfectWorldGameConfig config)
+    private static void PatchLauncherSettings(string settingsIniPath, PerfectWorldGameConfig config,
+        (string Key, string Value)[] settings)
     {
         try
         {
-            var desired = config.LauncherSilentSettings;
+            var desired = settings;
             if (desired.Length == 0) return;
 
             var sectionName = config.LauncherSettingsSectionName;
