@@ -202,12 +202,11 @@ install consequently requires *both* the game runtime and the launcher entry poi
 launcher-less install is reported as *not installed* until a repair fetches it. A shared, config-driven
 **silent launch** then keeps the launcher out of the way: right before every launch the plugin patches the
 launcher's own user-writable settings (`…\UserData\Config\Config.ini`) to auto-login, auto-start the game and
-quit together with it (never reappearing afterwards), tracks the real **game** process rather than the thin
-launcher shim (which exits within a second of spawning the game), and — when Collapse itself runs **as
-administrator** — hides the launcher window during the ~1-minute auto-login start-up, revealing it only if an
-interactive login is actually needed (first run / expired token) or after a safety timeout. Elevation is
-required for the window-hiding because the vendor game process is force-elevated and Windows UIPI blocks a
-non-elevated host from touching its window.
+quit together with it (never reappearing afterwards), and tracks the real **game** process rather than the thin
+launcher shim (which exits within a second of spawning the game). The launcher is started **minimised** (to the
+taskbar) so it does not pop up in the foreground during its brief auto-login start-up; on the default auto-click
+path it then minimises itself to the tray once its "开始游戏" button is pressed, and it is terminated together with
+the game.
 
 The per-game specifics differ:
 
@@ -268,9 +267,9 @@ To avoid it, the plugin's **default** launch path presses the launcher's real "�
   elevated too; when it doesn't, auto-click is skipped and the `/autoplay` fallback is used.
 * **Fallback ladder (you are never left stuck).** If auto-click can't activate (Collapse not elevated, or the
   embedded DLL can't be prepared) the plugin uses the old `/autoplay` path. If injection is *attempted* but
-  fails, the launcher is started **without** `/autoplay` and its window is left visible so you can click
-  "开始游戏" yourself. If injection succeeds but the click never fires, the normal reveal-timeout still surfaces
-  the window for a manual click.
+  fails, the launcher is started **without** `/autoplay` (minimised to the taskbar) so you can restore it and
+  click "开始游戏" yourself. If injection succeeds but the click never fires, the launcher simply stays at the
+  button — restore it from the taskbar and press it manually.
 * **Diagnostics.** The DLL writes `%TEMP%\PwAutoClick.log` (symbol resolution, hook count, object capture, the
   `invokeMethod` result); the plugin logs `[PWAutoClick]` lines for injection status. Both are safe to delete.
 * **To disable / revert.** Set `LauncherAutoClickEnabled = false` in the game's preset (`NteCnPresetConfig.cs` /

@@ -63,9 +63,9 @@ public sealed class PerfectWorldGameConfig
     ///     When <see langword="true"/>, the plugin drives the vendor launcher "silently": it patches the launcher's
     ///     own settings (auto-login / auto-start game / quit-with-game) before launch and tracks the real game
     ///     process instead of the launcher, so the user does not have to click "Start" and the launcher does not
-    ///     reappear after the game exits. Additional window hiding during start-up is applied only when the host
-    ///     process is elevated (the vendor launcher requires administrator, so a non-elevated host cannot touch its
-    ///     window). Requires <see cref="LauncherBootstrapperRelativePath"/> to be set.
+    ///     reappear after the game exits. The launcher is started minimised so it does not pop up in the foreground
+    ///     during start-up (it still minimises itself to the tray once the game starts). Requires
+    ///     <see cref="LauncherBootstrapperRelativePath"/> to be set.
     /// </summary>
     public bool SilentLaunch { get; init; }
 
@@ -77,17 +77,10 @@ public sealed class PerfectWorldGameConfig
     public string LauncherSettingsIniRelativePath { get; init; } = string.Empty;
 
     /// <summary>
-    ///     Base names (without extension) of the vendor launcher's process tree, used to hide their windows during
-    ///     start-up and to clean them up after the game exits, e.g. <c>["NTEGame", "NTELauncher", ...]</c>.
+    ///     Base names (without extension) of the vendor launcher's process tree, used to detect the launcher tree and
+    ///     clean it up after the game exits, e.g. <c>["NTEGame", "NTELauncher", ...]</c>.
     /// </summary>
     public string[] LauncherProcessBaseNames { get; init; } = [];
-
-    /// <summary>
-    ///     While hiding the launcher window during a silent start-up, reveal it after this many seconds if the game
-    ///     has still not started (a fallback so first-time/expired-token logins, which need the visible login UI,
-    ///     are not left hidden). Only relevant when the host is elevated.
-    /// </summary>
-    public int LauncherStartupRevealTimeoutSeconds { get; init; } = 120;
 
     /// <summary>
     ///     Install-relative directory that holds the vendor launcher (the self-update target of the launcher
@@ -104,8 +97,8 @@ public sealed class PerfectWorldGameConfig
 
     /// <summary>
     ///     Path (relative to the vendor launcher directory, i.e. <see cref="LauncherRootDirName"/>) of the launcher
-    ///     log that is tailed during a silent launch to detect an interactive-login requirement, e.g.
-    ///     <c>UserData\Log\NTEGame.log</c>.
+    ///     log that is tailed during an auto-click launch to detect the "ready to start" marker
+    ///     (<see cref="LauncherAutoClickReadyLogMarker"/>), e.g. <c>UserData\Log\NTEGame.log</c>.
     /// </summary>
     public string LauncherLogRelativePath { get; init; } = Path.Combine("UserData", "Log", "NTEGame.log");
 
@@ -116,13 +109,6 @@ public sealed class PerfectWorldGameConfig
     ///     异环/NTE) that expose a dynamic background via the launcher self-update tree, so those are unaffected.
     /// </summary>
     public string? LocalBackgroundResPackRelativePath { get; init; }
-
-    /// <summary>
-    ///     Substrings that, when found in the launcher log, indicate that the cached-token auto-login failed and an
-    ///     interactive login UI must be revealed to the user. Used only during a silent launch.
-    /// </summary>
-    public string[] LoginNeededLogMarkers { get; init; } =
-        ["onAutoLoginFailed", "onAutoLoginTimeOut", "autoLoginTokenError", "needLoginFirst"];
 
     /// <summary>
     ///     INI section header (including brackets) inside <see cref="LauncherSettingsIniRelativePath"/> under which

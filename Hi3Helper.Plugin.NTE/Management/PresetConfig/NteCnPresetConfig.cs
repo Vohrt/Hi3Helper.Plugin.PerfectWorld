@@ -66,12 +66,10 @@ public partial class NteCnPresetConfig : PluginPresetConfigBase
         // (see README "Known issues"). (P5X likewise REQUIRES /autoplay; see P5xCnPresetConfig.)
         LaunchArguments                  = "/launcher /directly /autoplay",
         // Silent-launch: patch the launcher's own settings so it auto-logs-in, auto-starts the game (no "Start"
-        // click) and quits together with the game (no reappear afterwards). Window hiding during start-up is added
-        // automatically when Collapse itself runs as administrator (NTEGame.exe is force-elevated).
+        // click) and quits together with the game (no reappear afterwards).
         SilentLaunch                     = true,
         LauncherSettingsIniRelativePath  = @"NTELauncher\UserData\Config\Config.ini",
         LauncherProcessBaseNames         = ["NTEGame", "NTELauncher", "NTEUpdate", "NTEBrowser", "NTEWebBooster", "NTEErrRep"],
-        LauncherStartupRevealTimeoutSeconds = 120,
         // ---- DLL-injection auto-click launch path (ON by default; see README "异环 auto-click") ----
         // When enabled AND Collapse runs elevated, the plugin injects PwAutoClick.dll into NTEGame.exe and presses the
         // real "开始游戏" button via Qt meta-object invocation once NTEGame logs it is ready — instead of "/autoplay".

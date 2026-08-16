@@ -60,14 +60,11 @@ public partial class P5xCnPresetConfig : PluginPresetConfigBase
         // does not self-relaunch and strip the flag); "/autoplay" is the override. Verified end-to-end on the live install.
         LaunchArguments                  = "/launcher /directly /autoplay",
         // Silent-launch ENABLED. The core patches the launcher's own settings (autoLogin=1 so a cached session logs in
-        // automatically; quitWithGame=1 / showAfterGameQuit=0 so the launcher exits with the game and never reappears)
-        // and, when Collapse runs elevated, hides the launcher window until the game appears. Auto-START comes from the
-        // /autoplay flag above (P5X ignores the INI autoRun). The login-needed markers (core defaults) were confirmed
-        // present verbatim in P5XGame.exe, so the graceful reveal-on-interactive-login path still works.
+        // automatically; quitWithGame=1 / showAfterGameQuit=0 so the launcher exits with the game and never reappears).
+        // On the "/autoplay" fallback path, auto-START comes from the /autoplay flag above (P5X ignores the INI autoRun).
         SilentLaunch                     = true,
         LauncherSettingsIniRelativePath  = @"P5XLaunch\UserData\Config\Config.ini",
         LauncherProcessBaseNames         = ["P5XGame", "P5XLauncher", "P5XUpdate", "P5XBrowser", "P5XWebBooster", "P5XErrRep"],
-        LauncherStartupRevealTimeoutSeconds = 120,
         // P5X-specific install layout (differs from 异环's NTELauncher/Client):
         LauncherRootDirName              = "P5XLaunch",
         ContentRootDirName               = "client",

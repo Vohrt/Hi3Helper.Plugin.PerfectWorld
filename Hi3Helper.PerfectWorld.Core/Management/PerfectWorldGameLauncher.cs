@@ -4,7 +4,6 @@ using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using System.IO;
 using System.Linq;
-using System.Runtime.InteropServices;
 using System.Security.Principal;
 using System.Text;
 using System.Threading;
@@ -21,15 +20,15 @@ namespace Hi3Helper.PerfectWorld.Core.Management;
 /// <summary>
 ///     Reusable game-launch driver for Perfect World pw_sdk titles. It is entirely driven by the game's
 ///     <see cref="PerfectWorldGameConfig"/> (which vendor launcher to run, which settings to patch, which log to
-///     tail, which login markers to watch for), so a thin plugin only has to forward its ABI game-launch overrides
+///     tail, which ready marker to wait for), so a thin plugin only has to forward its ABI game-launch overrides
 ///     to a single shared instance of this class.
 /// </summary>
 /// <remarks>
 ///     Behaviour mirrors the official vendor shortcut: when the vendor launcher is present it is launched (so the
 ///     account-login UI, anti-cheat and pipe hand-off all run) with the install root as working directory; when
 ///     <see cref="PerfectWorldGameConfig.SilentLaunch"/> is set, the launcher is additionally driven "silently"
-///     (settings patched for auto-login/auto-start/quit-with-game, and — only when the host is elevated — its
-///     start-up window hidden until the game appears).
+///     (settings patched for auto-login/auto-start/quit-with-game, and — on the auto-click path — its "开始游戏"
+///     button pressed for you once it reports ready).
 /// </remarks>
 public sealed partial class PerfectWorldGameLauncher
 {
@@ -323,7 +322,7 @@ public sealed partial class PerfectWorldGameLauncher
         }
 
         // A silent launch is only meaningful when going through the vendor launcher: it is the launcher (not the
-        // game) whose window/flow we are hiding. When we launch the game directly there is nothing extra to hide.
+        // game) whose auto-login/start-up flow we drive. When we launch the game directly there is nothing to silence.
         var silent = usingBootstrapper && config.SilentLaunch;
 
         // Decide the launch path: DLL-injection auto-click (presses the launcher's real "开始游戏" button after its
@@ -358,6 +357,15 @@ public sealed partial class PerfectWorldGameLauncher
 
         startInfo.WorkingDirectory = workingDirectory;
         startInfo.UseShellExecute = false;
+
+        // Start the vendor launcher minimised so it does not pop up in the foreground during its brief auto-login /
+        // resource-check start-up (it still self-minimises to the tray once the game starts). This is a pure launch-time
+        // hint: .NET sets STARTF_USESHOWWINDOW in the child's STARTUPINFO, and Windows applies wShowWindow to the
+        // launcher's FIRST ShowWindow call — so the Qt window comes up minimised even though it asks for a normal show.
+        // No window enumeration, no post-start manipulation, no elevation/UIPI concern; DLL injection and the Qt
+        // slot-invoke auto-click work regardless of window state, so this is cosmetic only.
+        if (silent)
+            startInfo.WindowStyle = ProcessWindowStyle.Minimized;
 
         // Hand the auto-click configuration to the launcher-to-be through inherited environment variables.
         autoClick?.PopulateEnvironment(startInfo.Environment);
@@ -448,10 +456,10 @@ public sealed partial class PerfectWorldGameLauncher
     ///     Drives a silent launch through the vendor launcher. The launcher's own settings (already patched before
     ///     start) make it auto-login and quit together with the game. The game is started either by the vendor
     ///     "/autoplay" flag or, on the auto-click path, by the injected helper DLL pressing the real "开始游戏" button
-    ///     once we signal that the launcher reached its ready state. On top of that, when Collapse itself runs elevated,
-    ///     the launcher's start-up window is hidden until the game appears (revealed early only if the log reports that
-    ///     an interactive login is required, or after a timeout). We always track the GAME process, because the thin
-    ///     bootstrapper exits within a second of spawning the elevated launcher.
+    ///     once we signal that the launcher reached its ready state. The launcher is started minimised so it does not
+    ///     surface in the foreground during start-up (it minimises itself to the tray after the button is pressed); we
+    ///     always track the GAME process, because the thin bootstrapper exits within a second of spawning the elevated
+    ///     launcher.
     /// </summary>
     private static async Task DriveLauncherSilentlyAsync(SilentLaunchPlan plan, long launcherLogStartLength,
         bool autoClickInjected, CancellationToken token)
@@ -460,10 +468,6 @@ public sealed partial class PerfectWorldGameLauncher
         var elevated = IsProcessElevated();
 
         var autoClickActive = plan.AutoClick is not null && autoClickInjected;
-        // If auto-click was requested but injection failed, the launcher was started WITHOUT "/autoplay", so it will
-        // park at the "开始游戏" button. Keep its window visible so the user can press it themselves (still the
-        // correct on-demand-voice flow) instead of hiding a launcher that will never auto-start.
-        var autoClickInjectionFailed = plan.AutoClick is not null && !autoClickInjected;
 
         // Fire the injected click once the launcher's log shows it is ready to start the game.
         using var signalCts = CancellationTokenSource.CreateLinkedTokenSource(token);
@@ -472,35 +476,15 @@ public sealed partial class PerfectWorldGameLauncher
             signalTask = Task.Run(() => WatchForReadyAndSignalAsync(plan, launcherLogStartLength, signalCts.Token),
                 CancellationToken.None);
 
-        // Window hiding is only possible when we can actually touch the launcher's (elevated) windows, i.e. when the
-        // host is elevated too. Otherwise we degrade gracefully: the settings patch still removes the manual "Start"
-        // click and the after-exit reappearance, the launcher merely flashes during start-up/auto-login.
-        using var hideCts = CancellationTokenSource.CreateLinkedTokenSource(token);
-        var hideTask = Task.CompletedTask;
-        if (elevated && baseNames.Length > 0 && !autoClickInjectionFailed)
-        {
-            var revealTimeout = plan.Config.LauncherStartupRevealTimeoutSeconds > 0
-                ? plan.Config.LauncherStartupRevealTimeoutSeconds
-                : 120;
-            hideTask = Task.Run(() => HideLauncherWindowsLoopAsync(plan.LauncherDir, baseNames, revealTimeout,
-                launcherLogStartLength, plan.Config, hideCts.Token), CancellationToken.None);
-        }
-
         Process? game = await WaitForGameAppearOrAbortAsync(plan.GameExePath, plan.LauncherDir, baseNames, token);
 
-        // Stop hiding/signalling once the game is up (it now covers the screen) or if we gave up waiting.
-        hideCts.Cancel();
+        // Stop signalling once the game is up (or if we gave up waiting).
         signalCts.Cancel();
-        try { await hideTask; } catch { /* best-effort */ }
         try { await signalTask; } catch { /* best-effort */ }
 
+        // No game ever appeared (user closed the launcher, cancelled a login, or launch failed); nothing to clean up.
         if (game is null)
-        {
-            // No game ever appeared (user closed the launcher, cancelled a login, or launch failed). Make sure we did
-            // not leave any launcher window hidden.
-            if (elevated && baseNames.Length > 0) SetLauncherWindowsVisible(plan.LauncherDir, baseNames, true);
             return;
-        }
 
         using (game)
         {
@@ -546,36 +530,6 @@ public sealed partial class PerfectWorldGameLauncher
         }
 
         return null;
-    }
-
-    /// <summary>
-    ///     Keeps the launcher's start-up window hidden until either the game appears (loop is cancelled) or an
-    ///     interactive login is detected / the reveal timeout elapses, in which case the window is shown so the user
-    ///     can complete the first-time or expired-token login.
-    /// </summary>
-    private static async Task HideLauncherWindowsLoopAsync(string launcherDir, string[] baseNames,
-        int revealTimeoutSeconds, long launcherLogStartLength, PerfectWorldGameConfig config, CancellationToken token)
-    {
-        var start = DateTime.UtcNow;
-
-        while (!token.IsCancellationRequested)
-        {
-            var needLogin = LauncherReportsLoginNeeded(launcherDir, launcherLogStartLength, config);
-            var timedOut = (DateTime.UtcNow - start).TotalSeconds > revealTimeoutSeconds;
-
-            if (needLogin || timedOut)
-            {
-                // Reveal for an interactive login (or as a timeout fallback) and stop: revealing is terminal, so
-                // there is nothing left to hide and no reason to keep polling until the caller cancels us.
-                SetLauncherWindowsVisible(launcherDir, baseNames, true);
-                return;
-            }
-
-            SetLauncherWindowsVisible(launcherDir, baseNames, false);
-
-            try { await Task.Delay(300, token); }
-            catch { return; }
-        }
     }
 
     /// <summary>
@@ -625,90 +579,6 @@ public sealed partial class PerfectWorldGameLauncher
     }
 
     /// <summary>
-    ///     Shows or hides every top-level window owned by the launcher-tree processes. The game binary is never in the
-    ///     tree list, so this cannot hide the game itself.
-    /// </summary>
-    /// <remarks>
-    ///     Windows are located by enumerating all top-level windows (<see cref="NativeMethods.EnumWindows"/>) and
-    ///     matching their owning process id against the launcher tree — deliberately NOT via
-    ///     <see cref="Process.MainWindowHandle"/>. <c>MainWindowHandle</c> only ever returns a window that is currently
-    ///     <em>visible</em>: once a window has been hidden with <c>SW_HIDE</c> it reports <c>0</c>, which would make
-    ///     revealing an already-hidden window (e.g. the launcher's login screen) impossible and deadlock the silent
-    ///     launch forever. <c>EnumWindows</c> still finds hidden windows, so the reveal path always works.
-    /// </remarks>
-    private static unsafe void SetLauncherWindowsVisible(string launcherDir, string[] baseNames, bool visible)
-    {
-        var pids = new HashSet<uint>();
-        ForEachLauncherProcess(launcherDir, baseNames, p =>
-        {
-            try { pids.Add((uint)p.Id); }
-            catch { /* process already gone */ }
-        });
-        if (pids.Count == 0) return;
-
-        var context = new WindowVisibilityContext(pids, visible);
-        var contextHandle = GCHandle.Alloc(context);
-        try
-        {
-            NativeMethods.EnumWindows(&SetWindowVisibilityCallback, GCHandle.ToIntPtr(contextHandle));
-        }
-        catch { /* best-effort */ }
-        finally
-        {
-            contextHandle.Free();
-        }
-    }
-
-    /// <summary>State handed to <see cref="SetWindowVisibilityCallback"/> through the <c>EnumWindows</c> lParam.</summary>
-    private sealed record WindowVisibilityContext(HashSet<uint> Pids, bool Visible);
-
-    /// <summary>
-    ///     <c>EnumWindows</c> callback: shows or hides the enumerated window when it belongs to one of the launcher
-    ///     process ids. Must never let an exception escape into the native caller.
-    /// </summary>
-    [UnmanagedCallersOnly]
-    private static int SetWindowVisibilityCallback(nint hWnd, nint lParam)
-    {
-        try
-        {
-            if (GCHandle.FromIntPtr(lParam).Target is not WindowVisibilityContext context)
-                return 1;
-
-            _ = NativeMethods.GetWindowThreadProcessId(hWnd, out uint windowPid);
-            if (!context.Pids.Contains(windowPid))
-                return 1;
-
-            if (context.Visible)
-                NativeMethods.ShowWindow(hWnd, NativeMethods.SW_SHOW);
-            else if (NativeMethods.IsWindowVisible(hWnd))
-                NativeMethods.ShowWindow(hWnd, NativeMethods.SW_HIDE);
-        }
-        catch { /* swallow: an exception must not cross the native boundary */ }
-
-        return 1; // keep enumerating
-    }
-
-    /// <summary>
-    ///     Tails the launcher's log (from the offset captured just before launch) for the markers that mean the
-    ///     cached-token auto-login failed and an interactive login UI must be revealed to the user
-    ///     (<see cref="PerfectWorldGameConfig.LoginNeededLogMarkers"/>).
-    /// </summary>
-    private static bool LauncherReportsLoginNeeded(string launcherDir, long launcherLogStartLength,
-        PerfectWorldGameConfig config)
-    {
-        var text = ReadLauncherLogFrom(launcherDir, launcherLogStartLength, config);
-        if (text.Length == 0) return false;
-
-        foreach (var marker in config.LoginNeededLogMarkers)
-        {
-            if (!string.IsNullOrEmpty(marker) && text.Contains(marker, StringComparison.Ordinal))
-                return true;
-        }
-
-        return false;
-    }
-
-    /// <summary>
     ///     Reads the launcher log from <paramref name="launcherLogStartLength"/> to the end, tolerating truncation or
     ///     rotation (reads from 0 if the file shrank). Returns an empty string on any error.
     /// </summary>
@@ -736,8 +606,8 @@ public sealed partial class PerfectWorldGameLauncher
     /// <summary>
     ///     Polls the launcher log until the "ready to start game" marker appears, then signals the injected auto-click
     ///     DLL to press the button. Returns once it has signalled, or when cancelled (the game appeared, or the launch
-    ///     was aborted). If the marker never appears the DLL is never released and the reveal-timeout fallback shows the
-    ///     launcher for a manual click.
+    ///     was aborted). If the marker never appears the DLL is never released and the (already-visible) launcher simply
+    ///     waits at the button for a manual click.
     /// </summary>
     private static async Task WatchForReadyAndSignalAsync(SilentLaunchPlan plan, long launcherLogStartLength,
         CancellationToken token)
@@ -896,26 +766,5 @@ public sealed partial class PerfectWorldGameLauncher
         {
             return false;
         }
-    }
-
-    private static partial class NativeMethods
-    {
-        internal const int SW_HIDE = 0;
-        internal const int SW_SHOW = 5;
-
-        [LibraryImport("user32.dll")]
-        [return: MarshalAs(UnmanagedType.Bool)]
-        internal static partial bool ShowWindow(nint hWnd, int nCmdShow);
-
-        [LibraryImport("user32.dll")]
-        [return: MarshalAs(UnmanagedType.Bool)]
-        internal static partial bool IsWindowVisible(nint hWnd);
-
-        [LibraryImport("user32.dll")]
-        [return: MarshalAs(UnmanagedType.Bool)]
-        internal static unsafe partial bool EnumWindows(delegate* unmanaged<nint, nint, int> lpEnumFunc, nint lParam);
-
-        [LibraryImport("user32.dll")]
-        internal static partial uint GetWindowThreadProcessId(nint hWnd, out uint lpdwProcessId);
     }
 }

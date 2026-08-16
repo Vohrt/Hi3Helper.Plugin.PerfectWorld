@@ -27,7 +27,7 @@ namespace Hi3Helper.PerfectWorld.Core.Management;
 ///     <para>
 ///         Injection requires the host (Collapse) to be elevated, which it already must be to start the
 ///         force-elevated vendor launcher at all. If anything here fails the launch still proceeds; the caller
-///         simply falls back to the "/autoplay" path or the user clicks the revealed launcher manually.
+///         simply falls back to the "/autoplay" path or the user clicks the visible launcher manually.
 ///     </para>
 /// </remarks>
 internal sealed partial class LauncherAutoClickSession : IDisposable
