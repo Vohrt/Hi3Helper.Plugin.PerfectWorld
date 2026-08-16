@@ -287,9 +287,9 @@ voice-bundling workaround, and the plugin carries no `OuterPackage`/sub-package 
 it, exactly like the official launcher).
 
 **Launcher auto-click (DLL injection) — the default launch path.** Passing `/autoplay` auto-starts the game but
-has side effects: on NTE it makes `NTEGame.exe` skip its in-process resource updater (the voice pitfall above),
-and the flag has historically clashed with overlay tools such as MSI Afterburner. To avoid it, the plugin's
-**default** launch path presses the launcher's real "开始游戏" button programmatically instead:
+has a side effect: on NTE it makes `NTEGame.exe` skip its in-process resource updater (the voice pitfall above).
+To avoid it, the plugin's **default** launch path presses the launcher's real "开始游戏" button programmatically
+instead:
 
 * **What is injected.** A tiny native helper, **`PwAutoClick.dll`** (x64, links the static CRT, depends only on
   `KERNEL32.dll`). Its source is in `Hi3Helper.PerfectWorld.Core/Native/PwAutoClick/`; the compiled DLL is

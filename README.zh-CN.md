@@ -249,8 +249,8 @@ https://raw.githubusercontent.com/<owner>/Hi3Helper.Plugin.PerfectWorld/release/
 变通，插件也完全不含 `OuterPackage` / 子包相关逻辑（这部分交由游戏自身处理，与官方启动器完全一致）。
 
 **启动器自动点击（DLL 注入）——默认的启动方式。** 传入 `/autoplay` 虽能自动进入游戏，却有副作用：在异环上它会让
-`NTEGame.exe` 跳过其进程内的资源更新器（即上文的语音隐患），而且该参数历来与 MSI Afterburner 等叠加层工具存在冲突。
-为避免它，插件的**默认**启动方式改为以程序化方式点击启动器真正的「开始游戏」按钮：
+`NTEGame.exe` 跳过其进程内的资源更新器（即上文的语音隐患）。为避免它，插件的**默认**启动方式改为以程序化方式点击
+启动器真正的「开始游戏」按钮：
 
 * **注入了什么。** 一个极小的原生辅助库 **`PwAutoClick.dll`**（x64，静态链接 CRT，仅依赖 `KERNEL32.dll`）。其源码位于
   `Hi3Helper.PerfectWorld.Core/Native/PwAutoClick/`；编译好的 DLL 作为资源嵌入 `PerfectWorld.Core.dll`，启动时释放到

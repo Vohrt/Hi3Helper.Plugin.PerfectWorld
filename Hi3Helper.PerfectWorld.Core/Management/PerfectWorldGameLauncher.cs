@@ -560,10 +560,10 @@ public sealed partial class PerfectWorldGameLauncher
 
         while (!token.IsCancellationRequested)
         {
-            var needReveal = LauncherNeedsReveal(launcherDir, launcherLogStartLength, config);
+            var needLogin = LauncherReportsLoginNeeded(launcherDir, launcherLogStartLength, config);
             var timedOut = (DateTime.UtcNow - start).TotalSeconds > revealTimeoutSeconds;
 
-            if (needReveal || timedOut)
+            if (needLogin || timedOut)
             {
                 // Reveal for an interactive login (or as a timeout fallback) and stop: revealing is terminal, so
                 // there is nothing left to hide and no reason to keep polling until the caller cancels us.
@@ -633,7 +633,7 @@ public sealed partial class PerfectWorldGameLauncher
     ///     matching their owning process id against the launcher tree — deliberately NOT via
     ///     <see cref="Process.MainWindowHandle"/>. <c>MainWindowHandle</c> only ever returns a window that is currently
     ///     <em>visible</em>: once a window has been hidden with <c>SW_HIDE</c> it reports <c>0</c>, which would make
-    ///     revealing an already-hidden window (e.g. a launcher conflict dialog) impossible and deadlock the silent
+    ///     revealing an already-hidden window (e.g. the launcher's login screen) impossible and deadlock the silent
     ///     launch forever. <c>EnumWindows</c> still finds hidden windows, so the reveal path always works.
     /// </remarks>
     private static unsafe void SetLauncherWindowsVisible(string launcherDir, string[] baseNames, bool visible)
@@ -689,25 +689,17 @@ public sealed partial class PerfectWorldGameLauncher
     }
 
     /// <summary>
-    ///     Tails the launcher's log (from the offset captured just before launch) for markers that mean the hidden
-    ///     launcher window must be revealed: either the cached-token auto-login failed and an interactive login is
-    ///     required (<see cref="PerfectWorldGameConfig.LoginNeededLogMarkers"/>), or the launcher raised a modal dialog
-    ///     that blocks the launch and needs the user, e.g. a software-conflict warning
-    ///     (<see cref="PerfectWorldGameConfig.LauncherAttentionLogMarkers"/>).
+    ///     Tails the launcher's log (from the offset captured just before launch) for the markers that mean the
+    ///     cached-token auto-login failed and an interactive login UI must be revealed to the user
+    ///     (<see cref="PerfectWorldGameConfig.LoginNeededLogMarkers"/>).
     /// </summary>
-    private static bool LauncherNeedsReveal(string launcherDir, long launcherLogStartLength,
+    private static bool LauncherReportsLoginNeeded(string launcherDir, long launcherLogStartLength,
         PerfectWorldGameConfig config)
     {
         var text = ReadLauncherLogFrom(launcherDir, launcherLogStartLength, config);
         if (text.Length == 0) return false;
 
         foreach (var marker in config.LoginNeededLogMarkers)
-        {
-            if (!string.IsNullOrEmpty(marker) && text.Contains(marker, StringComparison.Ordinal))
-                return true;
-        }
-
-        foreach (var marker in config.LauncherAttentionLogMarkers)
         {
             if (!string.IsNullOrEmpty(marker) && text.Contains(marker, StringComparison.Ordinal))
                 return true;
