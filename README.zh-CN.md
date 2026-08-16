@@ -113,18 +113,6 @@ P5X_1.0.0.0_API-0.1.5.0_20260724.zip
 Indexer.exe Hi3Helper.Plugin.NTE\publish\Release
 ```
 
-### 在 GitHub 上（Actions）
-
-**Release Plugin** 工作流（`.github/workflows/release.yml`）会在 `windows-latest` 运行器上完成整套流程，
-并把 zip 发布到 GitHub Release。在 *Actions* 选项卡 → *Release Plugin* → *Run workflow* 触发，并填写：
-
-* **version**——例如 `1.0.0`（同时会写入程序集与清单）
-* **publish_profile**——默认 `ReleasePublish-O2`（速度优先）；带 `…NoReflection…` 的档位会构建无反射变体
-
-该运行会把 `NTE_<版本>_API-<标准版本>_<日期>.zip` 发布到一个新的、标签为 `NTE@v<版本>` 的 Release，
-同时把新构建的 `manifest.json` + `NTE.dll` 推送到本仓库 `release` 分支的 `NTE/` 目录下，供插件内自更新器读取
-（见下文[自动更新](#自动更新插件自更新)）。无需任何额外密钥——它使用内置的 `GITHUB_TOKEN`。当前工作流构建的是
-**NTE** 插件；**P5X** 以完全相同的方式发布（相同的发布档位与 Indexer），通过一次等价的运行即可。
 
 ## 安装到 Collapse
 
@@ -230,26 +218,8 @@ https://raw.githubusercontent.com/<owner>/Hi3Helper.Plugin.PerfectWorld/release/
 「更新失败」死循环，并把每种语音语言都显示为没有大小（即认为它们都已安装），因为被跳过/喂养不足的更新器从未
 建立起有效的本地状态。改为一次性预先下载全部语音即可彻底规避该问题，代价是额外的磁盘与带宽占用。
 
-**设计说明（P5X）——为何 `/autoplay` 在这里是安全的，不同于异环。** P5X **不存在**异环那种语音隐患，因为它把内容
-拆成**两个相互独立的层**，而其可选配音恰好位于 `/autoplay` 永远碰不到的那一层：
-
-* **基础客户端（约 1.1 GB，125 个文件）**——由与异环相同的厂商 `PatcherSDK` 管理（其磁盘上的 `config.xml` 写着
-  `ResCount=125`、`ResSize=1155828821`）。这一层是 Unity 运行时、Lua，以及 `client\bin\Media\` 下少量基础 CRIWare
-  音频 / 开场 CG。插件（与官方启动器一致）只安装这一层；插件全新安装落盘仅约 1.1 GB。
-* **游戏本体（约 80 GB）**——由游戏**自身的 Zeus 引擎**管理，位于 `client\OuterPackage\`，在你首次进入游戏时经由
-  `HotFixTemp\DownloadTemp` 在游戏内下载。它包含全部 AssetBundle 以及**可选子包**，其中就有位于
-  `client\OuterPackage\ZeusSetting\SubpackageReadyOptionalTag\` 下的配音 / 本地化包 `optlocalcn`（中文）与
-  `optlocaljp`（日文）。
-
-因此「开始游戏」按钮做的是：`P5XGame.exe`（启动器）登录 → `GameClientAgent::launchGame` →
-`GameLifecycleMgr::startGame` → 运行 `client\pc\P5X.exe`（Unity）→ Zeus 下载/校验约 80 GB 的 OuterPackage 及
-任何已勾选的子包。`/autoplay` 只是替你自动点击该按钮（覆盖服务端的 `canAutoPlay=false`），它被转发给的是*启动器*
-而非 Unity 游戏本体，因此绝不会绕过 Zeus 的内容更新器。一句话：**异环把配音放进了 `/autoplay` 会跳过的
-启动器 / PatcherSDK 域，而 P5X 把配音放进了 `/autoplay` 触及不到的游戏引擎域**——所以 P5X 无需任何「预装配音」的
-变通，插件也完全不含 `OuterPackage` / 子包相关逻辑（这部分交由游戏自身处理，与官方启动器完全一致）。
-
 **启动器自动点击（DLL 注入）——默认的启动方式。** 传入 `/autoplay` 虽能自动进入游戏，却有副作用：在异环上它会让
-`NTEGame.exe` 跳过其进程内的资源更新器（即上文的语音隐患）。为避免它，插件的**默认**启动方式改为以程序化方式点击
+`NTEGame.exe` 跳过其进程内的资源更新器（即上文的语音隐患）。为避免它，插件的**默认**启动方式是以程序化方式点击
 启动器真正的「开始游戏」按钮：
 
 * **注入了什么。** 一个极小的原生辅助库 **`PwAutoClick.dll`**（x64，静态链接 CRT，仅依赖 `KERNEL32.dll`）。其源码位于
@@ -275,15 +245,7 @@ https://raw.githubusercontent.com/<owner>/Hi3Helper.Plugin.PerfectWorld/release/
 * **编译原生 DLL。** 普通的插件编译**无需** C++ 工具链——已提交的 `Native/PwAutoClick.dll` 会被原样嵌入。若你修改了
   C++ 源码，请在具备 *x64 Native Tools* 环境的命令行中运行 `Hi3Helper.PerfectWorld.Core/Native/PwAutoClick/build.ps1`
   重新生成它，然后再编译插件。
-* **状态。** 两款游戏均默认开启，但**尚未在正常游玩中验证**——若游戏无法启动，请查看 `%TEMP%\PwAutoClick.log`，并按
-  上文关闭以回退到 `/autoplay`。
 
-**已知问题（异环）——退出游戏后按钮可能会在一段时间内仍显示「游戏正在运行」。** 异环的官方启动器掌管着游戏进程的
-生命周期：当你关闭游戏时，它**并不会**立即结束 `HTGame.exe`，而是让该进程无窗口地空转，过一段时间后才回收。
-这看起来是官方启动器自身的特性 / bug——它关闭游戏进程非常慢。由于插件跟踪的是真正的游戏进程（这是判断游戏是否
-真正运行最可靠的信号），Collapse 会一直上报**游戏正在运行**，直到该进程最终退出，因此按钮可能需要过一会儿才会
-恢复为「开始游戏」。这个状态**会自动恢复**，无需任何操作。若希望它立刻恢复，可在 Windows 系统托盘右键点击**异环**
-图标并选择退出，即可立即强制结束这个残留进程。（插件刻意**不**主动提前杀掉该进程，以免误杀一个其实还在加载中的游戏。）
 
 ## 致谢与许可
 
