@@ -20,7 +20,14 @@
 //      first time it is registered under the configured name.
 //   3. We wait on a named Event that the plugin signals once its log tail sees the launcher reach
 //      "all ready, wait for start game" (GameClientAgent::onGameElementUpdateFinished).
-//   4. On that signal we call QMetaObject::invokeMethod(obj, "gameActionBtnClicked",
+//   4. Just before the click we bring the launcher's OWN main window to the foreground. The launcher
+//      gates the first-show of its start-game "cover" window — which hosts NTE's MSI Afterburner/RTSS
+//      conflict dialog — on the host window having focus (log: "hostHasFocus:0"). Without focus that show
+//      stalls on a fixed ~118s vendor timeout, so a conflict dialog would only appear after ~2 minutes
+//      (and normally hidden helper windows briefly surface in the taskbar meanwhile). Activating first
+//      makes it appear at once; it is harmless on the normal path (the launcher self-minimises to the
+//      tray right after the click anyway, exactly like a manual click).
+//   5. On the ready signal we call QMetaObject::invokeMethod(obj, "gameActionBtnClicked",
 //      Qt::QueuedConnection) — a thread-safe queued call that runs on the launcher's GUI thread, i.e.
 //      identical to a real click. That drives GameClientAgent::launchGame -> GameLifecycleMgr::startGame
 //      -> the real game exe. We never touch the game process itself.
@@ -310,6 +317,73 @@ static bool InvokeClick()
     return ok;
 }
 
+// ---------------------------------------------------------------------------------------------------
+// Bring the launcher's own main window to the foreground just before the click. See header step 4: the
+// launcher gates its start-game cover/conflict dialog's first-show on the host window having focus, so
+// without focus that show (e.g. NTE's MSI Afterburner/RTSS conflict dialog) stalls on a fixed ~118s
+// vendor timeout. We activate the window from inside the launcher process, which — with the standard
+// AttachThreadInput foreground-lock workaround — is reliable even when another app owns the foreground.
+// ---------------------------------------------------------------------------------------------------
+struct FindMainWndCtx { DWORD pid; HWND best; long long bestArea; };
+
+static BOOL CALLBACK EnumMainWndProc(HWND hwnd, LPARAM lp)
+{
+    auto* ctx = reinterpret_cast<FindMainWndCtx*>(lp);
+    DWORD pid = 0;
+    GetWindowThreadProcessId(hwnd, &pid);
+    if (pid != ctx->pid) return TRUE;                                   // another process
+    if (!IsWindowVisible(hwnd)) return TRUE;                            // hidden helper window
+    if (GetWindow(hwnd, GW_OWNER) != nullptr) return TRUE;             // owned popup, not the main window
+    if (GetWindowLongW(hwnd, GWL_EXSTYLE) & WS_EX_TOOLWINDOW) return TRUE;
+
+    RECT r{};
+    if (!GetWindowRect(hwnd, &r)) return TRUE;
+    long long area = static_cast<long long>(r.right - r.left) * (r.bottom - r.top);
+    if (area <= 0) return TRUE;
+    if (area > ctx->bestArea) { ctx->bestArea = area; ctx->best = hwnd; } // largest = the real launcher window
+    return TRUE;
+}
+
+static HWND FindMainLauncherWindow()
+{
+    FindMainWndCtx ctx{ GetCurrentProcessId(), nullptr, 0 };
+    EnumWindows(&EnumMainWndProc, reinterpret_cast<LPARAM>(&ctx));
+    return ctx.best;
+}
+
+static void ForegroundMainWindow()
+{
+    HWND hwnd = FindMainLauncherWindow();
+    if (!hwnd)
+    {
+        Log("foreground activation skipped: main window not found");
+        return;
+    }
+
+    if (IsIconic(hwnd)) ShowWindow(hwnd, SW_RESTORE);
+
+    // Foreground-lock workaround: briefly attach this thread's input to the current foreground thread so
+    // SetForegroundWindow is honoured even when another app currently owns the foreground.
+    DWORD thisThread = GetCurrentThreadId();
+    HWND  hFore      = GetForegroundWindow();
+    DWORD foreThread = hFore ? GetWindowThreadProcessId(hFore, nullptr) : 0;
+    bool  attached   = foreThread && foreThread != thisThread &&
+                       AttachThreadInput(thisThread, foreThread, TRUE) != 0;
+
+    BringWindowToTop(hwnd);
+    BOOL sfw = SetForegroundWindow(hwnd);
+
+    if (attached) AttachThreadInput(thisThread, foreThread, FALSE);
+
+    // Let the GUI thread process the resulting WM_ACTIVATE BEFORE we post the click, so the start-game
+    // flow observes the host window as focused. Bounded poll (up to ~1s) plus a short settle delay.
+    for (int i = 0; i < 40 && GetForegroundWindow() != hwnd; ++i) Sleep(25);
+    Sleep(150);
+
+    Log("foreground activation: hwnd=%p setForeground=%d foreground=%p",
+        hwnd, sfw ? 1 : 0, GetForegroundWindow());
+}
+
 static DWORD WINAPI WorkerThread(LPVOID)
 {
     ResolveConfigFromEnv();
@@ -351,6 +425,11 @@ static DWORD WINAPI WorkerThread(LPVOID)
         CloseHandle(ev);
         return 0;
     }
+
+    // Bring the launcher's main window to the foreground so the start-game flow (and any conflict dialog
+    // it raises) sees the host window as focused and shows at once, instead of stalling on the launcher's
+    // ~118s no-focus timeout. Harmless on the normal path — the launcher self-minimises after the click.
+    ForegroundMainWindow();
 
     InvokeClick();
     CloseHandle(ev);
