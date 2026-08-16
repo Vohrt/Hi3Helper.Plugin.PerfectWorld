@@ -358,14 +358,12 @@ public sealed partial class PerfectWorldGameLauncher
         startInfo.WorkingDirectory = workingDirectory;
         startInfo.UseShellExecute = false;
 
-        // Start the vendor launcher minimised so it does not pop up in the foreground during its brief auto-login /
-        // resource-check start-up (it still self-minimises to the tray once the game starts). This is a pure launch-time
-        // hint: .NET sets STARTF_USESHOWWINDOW in the child's STARTUPINFO, and Windows applies wShowWindow to the
-        // launcher's FIRST ShowWindow call — so the Qt window comes up minimised even though it asks for a normal show.
-        // No window enumeration, no post-start manipulation, no elevation/UIPI concern; DLL injection and the Qt
-        // slot-invoke auto-click work regardless of window state, so this is cosmetic only.
-        if (silent)
-            startInfo.WindowStyle = ProcessWindowStyle.Minimized;
+        // The vendor launcher runs in its normal (visible) window during its brief auto-login / resource-check
+        // start-up: on the default auto-click path it minimises itself to the tray the moment its "开始游戏" button is
+        // pressed, exactly like the official launcher after a manual click. Keeping it visible also ensures any prompt
+        // it raises stays on screen — e.g. NTE's MSI Afterburner/RTSS conflict dialog, or a login prompt — so the user
+        // can see and act on it. (An earlier build started it minimised via STARTF_USESHOWWINDOW: Qt honoured the hint
+        // inconsistently and, worse, it hid that conflict dialog so NTE could never be started while Afterburner ran.)
 
         // Hand the auto-click configuration to the launcher-to-be through inherited environment variables.
         autoClick?.PopulateEnvironment(startInfo.Environment);
@@ -456,10 +454,10 @@ public sealed partial class PerfectWorldGameLauncher
     ///     Drives a silent launch through the vendor launcher. The launcher's own settings (already patched before
     ///     start) make it auto-login and quit together with the game. The game is started either by the vendor
     ///     "/autoplay" flag or, on the auto-click path, by the injected helper DLL pressing the real "开始游戏" button
-    ///     once we signal that the launcher reached its ready state. The launcher is started minimised so it does not
-    ///     surface in the foreground during start-up (it minimises itself to the tray after the button is pressed); we
-    ///     always track the GAME process, because the thin bootstrapper exits within a second of spawning the elevated
-    ///     launcher.
+    ///     once we signal that the launcher reached its ready state. The launcher runs visibly during its brief start-up
+    ///     and minimises itself to the tray once the button is pressed (exactly like the official launcher after a
+    ///     manual click); we always track the GAME process, because the thin bootstrapper exits within a second of
+    ///     spawning the elevated launcher.
     /// </summary>
     private static async Task DriveLauncherSilentlyAsync(SilentLaunchPlan plan, long launcherLogStartLength,
         bool autoClickInjected, CancellationToken token)

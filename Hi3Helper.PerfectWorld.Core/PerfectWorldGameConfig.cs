@@ -63,8 +63,8 @@ public sealed class PerfectWorldGameConfig
     ///     When <see langword="true"/>, the plugin drives the vendor launcher "silently": it patches the launcher's
     ///     own settings (auto-login / auto-start game / quit-with-game) before launch and tracks the real game
     ///     process instead of the launcher, so the user does not have to click "Start" and the launcher does not
-    ///     reappear after the game exits. The launcher is started minimised so it does not pop up in the foreground
-    ///     during start-up (it still minimises itself to the tray once the game starts). Requires
+    ///     reappear after the game exits. The launcher runs in its normal window during start-up and minimises itself
+    ///     to the tray once the game starts (like the official launcher after a manual click). Requires
     ///     <see cref="LauncherBootstrapperRelativePath"/> to be set.
     /// </summary>
     public bool SilentLaunch { get; init; }
