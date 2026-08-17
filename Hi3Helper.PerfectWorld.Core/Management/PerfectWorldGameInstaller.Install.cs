@@ -373,6 +373,7 @@ public partial class PerfectWorldGameInstaller
         await WritePatcherStateAsync(installPath, remote, bundle, token).ConfigureAwait(false);
 
         Manager.WriteInstalledResVersion(remote.ResVersion);
+        Manager.ClearLauncherHasUpdate();
         progressStateDelegate?.Invoke(InstallProgressState.Completed);
 
         SharedStatic.InstanceLogger.LogInformation(

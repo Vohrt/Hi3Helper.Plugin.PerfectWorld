@@ -33,6 +33,14 @@ public partial class PerfectWorldGameManager : GameManagerBase
     private PerfectWorldRemoteConfig? _remoteConfig;
     private bool _isInitialized;
 
+    /// <summary>
+    ///     Whether the installed vendor launcher is older than the version currently advertised on the CDN. Set during
+    ///     <see cref="InitAsyncInner"/> and cleared after a successful launcher install/update. When <see langword="true"/>
+    ///     it is folded into <see cref="HasUpdate"/> so the Collapse UI shows "Update available" rather than "Start",
+    ///     preventing the launcher from blocking the auto-click path with its own self-update prompt.
+    /// </summary>
+    private bool _launcherHasUpdate;
+
     // Coordinates the fire-and-forget re-init started by SetGamePathInner with path changes and disposal.
     //  * _lifetimeCts is cancelled on Dispose so no background task keeps using the (disposed) HttpClient.
     //  * _currentInitCts supersedes the previous in-flight re-init when the game path changes again.
@@ -82,7 +90,10 @@ public partial class PerfectWorldGameManager : GameManagerBase
     }
 
     protected override bool HasUpdate =>
-        IsInstalled && ApiGameVersion != GameVersion.Empty && CurrentGameVersion != ApiGameVersion;
+        IsInstalled && (
+            (ApiGameVersion != GameVersion.Empty && CurrentGameVersion != ApiGameVersion) ||
+            _launcherHasUpdate
+        );
 
     // pw_sdk exposes upcoming versions through the same delta channel; a dedicated preload feed is not used.
     protected override bool HasPreload => false;
@@ -132,6 +143,12 @@ public partial class PerfectWorldGameManager : GameManagerBase
         // Remote available version (the slow part; done outside any lock).
         PerfectWorldRemoteConfig? remote = await GetRemoteConfigAsync(true, token).ConfigureAwait(false);
 
+        // Check whether the installed vendor launcher is up-to-date. This prevents the launcher's own self-update
+        // prompt from blocking the auto-click path (which expects the "开始游戏" button, not an update UI).
+        bool launcherHasUpdate = false;
+        if (!string.IsNullOrEmpty(CurrentGameInstallPath) && _config.LauncherCdnUrls.Length > 0)
+            launcherHasUpdate = await CheckLauncherHasUpdateAsync(token).ConfigureAwait(false);
+
         // Read the local installed version AFTER the fetch so a concurrent install/update that finished while the
         // request was in flight is reflected, rather than overwritten by a stale pre-await snapshot.
         string? localVersion = ReadInstalledResVersion();
@@ -153,6 +170,7 @@ public partial class PerfectWorldGameManager : GameManagerBase
             CurrentGameVersion = localGameVersion;
             if (apiGameVersion.HasValue)
                 ApiGameVersion = apiGameVersion.Value;
+            _launcherHasUpdate = launcherHasUpdate;
 
             _isInitialized = true;
         }
@@ -161,6 +179,89 @@ public partial class PerfectWorldGameManager : GameManagerBase
     }
 
     protected override Task<int> InitAsync(CancellationToken token) => InitAsyncInner(true, token);
+
+    /// <summary>
+    ///     Compares the vendor launcher version that is installed on disk against the version currently advertised on
+    ///     the CDN. Returns <see langword="true"/> when the installed launcher is absent or older than the remote one
+    ///     (i.e. its <c>Version.ini</c> does not exist, or its <c>Build</c>/<c>FileListURL</c> version segment differs
+    ///     from the remote one). A network failure or any other transient error is treated as "no update known" so an
+    ///     unreachable CDN never blocks a launch.
+    /// </summary>
+    private async Task<bool> CheckLauncherHasUpdateAsync(CancellationToken token)
+    {
+        if (string.IsNullOrEmpty(CurrentGameInstallPath)) return false;
+
+        try
+        {
+            // Fetch the remote Version.ini to get the current launcher version directory.
+            byte[]? remoteBytes = null;
+            foreach (string cdn in _config.LauncherCdnUrls)
+            {
+                try
+                {
+                    string url = _config.BuildLauncherVersionIniUrl(cdn);
+                    remoteBytes = await ApiResponseHttpClient.GetByteArrayAsync(url, token).ConfigureAwait(false);
+                    break;
+                }
+                catch (Exception ex) when (!(ex is OperationCanceledException && token.IsCancellationRequested))
+                {
+                    SharedStatic.InstanceLogger.LogWarning(
+                        "[PerfectWorldManager] Could not fetch launcher Version.ini from {Cdn}: {Msg}", cdn, ex.Message);
+                }
+            }
+
+            if (remoteBytes == null) return false;
+
+            string remoteIni = System.Text.Encoding.UTF8.GetString(remoteBytes);
+            (string? remoteFileListUrl, _, _) = PerfectWorldLauncherManifestParser.ParseVersionIni(remoteIni);
+            if (string.IsNullOrEmpty(remoteFileListUrl)) return false;
+            string? remoteVersionDir = PerfectWorldLauncherManifestParser.ExtractVersionDir(remoteFileListUrl);
+            if (string.IsNullOrEmpty(remoteVersionDir)) return false;
+
+            // Read the local launcher Version.ini written by the launcher's own self-updater after it installs.
+            string localVersionIniPath = Path.Combine(CurrentGameInstallPath,
+                _config.LauncherRootDirName, "Version.ini");
+            if (!File.Exists(localVersionIniPath))
+            {
+                // No local Version.ini: launcher is either freshly installed by the plugin (pre-first-run) or absent.
+                // Treat as no update needed — the installer already laid down the correct version.
+                return false;
+            }
+
+            string localIni = await File.ReadAllTextAsync(localVersionIniPath, token).ConfigureAwait(false);
+            (string? localFileListUrl, _, _) = PerfectWorldLauncherManifestParser.ParseVersionIni(localIni);
+            string? localVersionDir = string.IsNullOrEmpty(localFileListUrl)
+                ? null
+                : PerfectWorldLauncherManifestParser.ExtractVersionDir(localFileListUrl);
+
+            bool hasUpdate = !string.Equals(localVersionDir, remoteVersionDir, StringComparison.OrdinalIgnoreCase);
+            if (hasUpdate)
+                SharedStatic.InstanceLogger.LogInformation(
+                    "[PerfectWorldManager] Launcher update available: local={Local} remote={Remote}",
+                    localVersionDir ?? "(none)", remoteVersionDir);
+
+            return hasUpdate;
+        }
+        catch (OperationCanceledException) { throw; }
+        catch (Exception ex)
+        {
+            SharedStatic.InstanceLogger.LogWarning(
+                "[PerfectWorldManager] Launcher update check failed (treating as up-to-date): {Msg}", ex.Message);
+            return false;
+        }
+    }
+
+    /// <summary>
+    ///     Clears the launcher-has-update flag after the installer has successfully updated the launcher. Called by
+    ///     <see cref="PerfectWorldGameInstaller"/> once the launcher plan has been downloaded and applied.
+    /// </summary>
+    internal void ClearLauncherHasUpdate()
+    {
+        lock (_initSync)
+        {
+            _launcherHasUpdate = false;
+        }
+    }
 
     /// <summary>
     ///     Reads the currently installed resource version. Prefers the plugin-owned state file and falls back

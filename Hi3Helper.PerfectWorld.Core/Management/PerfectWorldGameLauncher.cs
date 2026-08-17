@@ -508,7 +508,11 @@ public sealed partial class PerfectWorldGameLauncher
     {
         var start = DateTime.UtcNow;
         const int intervalMs = 1000;
-        const double abortAfterTreeDeadSeconds = 60;   // launcher tree gone this long with no game => aborted
+        // A sustained absence of the launcher tree with no game process in sight is treated as an aborted launch.
+        // 10 seconds is enough to bridge the gap between the thin bootstrapper exiting and the elevated launcher (or
+        // game) appearing behind a UAC prompt. Keeping this short also means the plugin recovers quickly when the user
+        // closes the launcher without starting the game (e.g. a self-update prompt that they dismiss).
+        const double abortAfterTreeDeadSeconds = 10;
         const double hardCapSeconds = 15 * 60;         // absolute safety net
         double treeDeadForSeconds = 0;
 
