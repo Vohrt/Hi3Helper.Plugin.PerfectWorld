@@ -219,9 +219,9 @@ The per-game specifics differ:
   to the install root. A finished install needs both `HTGameBase.dll` and `NTEGame.exe`. By default the plugin
   presses the launcher's "开始游戏" button via DLL-injection **auto-click** (see *Launcher auto-click* below); if
   that is unavailable it falls back to passing `/autoplay`, which auto-starts the game without a manual click but
-  makes `NTEGame.exe` skip its in-process resource updater. Because the plugin must stay correct on the
-  `/autoplay` fallback too, it still downloads **all** of NTE's voice languages up front at install/update time
-  (see *Known issues* below).
+  makes `NTEGame.exe` skip its in-process resource updater. Because that default auto-click path runs the
+  in-process updater, the plugin installs only the base game plus the default (Chinese) voice and **defers** the
+  other languages for on-demand download in-game (see *On-demand voice* below).
 * **P5X** (Unity IL2CPP, `client\pc\P5X.exe`). The plugin launches `P5XLaunch\P5XGame.exe` directly. By default
   it presses "开始游戏" via DLL-injection **auto-click** (see *Launcher auto-click* below); the fallback is
   `/launcher /directly /autoplay`. Either way the click is what matters: P5X's launcher gates auto-play off
@@ -229,22 +229,22 @@ The per-game specifics differ:
   "开始游戏" button — a real button press (auto-click) or the `/autoplay` override both get past it. A finished
   install needs both `GameAssembly.dll` and `P5XGame.exe`.
 
-**Known issue (NTE) — every voice language is downloaded, not just one.** The official launcher installs the
-base game plus a single default (Chinese) voice and lets the in-game updater fetch the other languages
-(Japanese / English / Korean) on demand, so a fresh official install lists those three with a download size.
-The plugin instead ships **all four** voice packs at install/update time, so an NTE install is ~5 GB larger
-than the official one and the in-game menu shows every language as already installed. This is deliberate and
-tied to the `/autoplay` **fallback** (above): that flag auto-starts the game but makes `NTEGame.exe` skip the
-in-process `GameResUpdaterAgent` — the very component that reconciles/downloads voices on demand and seeds the
-in-game updater's hand-off state. (The default *auto-click* path does let that updater run, but because every
-voice is already bundled it finds nothing to fetch — so the game behaves the same either way.) An earlier
-version tried to mirror the official launcher — defer the non-default
-voices, drop `/autoplay`, and forge the native `PatcherSDK` state files (`config.xml` / `ResList.xml` /
-`tmp\client.xml`) so the game would believe one voice was installed and fetch the rest itself. It was
-**abandoned**: in practice the game looped on "更新失败" (update failed) after returning to the login screen and
-listed every voice language *without* a size (i.e. it thought they were all already installed), because the
-skipped/under-seeded updater never established a valid local state. Bundling all voices up front sidesteps that
-entirely, at the cost of extra disk and bandwidth.
+**On-demand voice (NTE) — only the default voice is installed; the rest download in-game.** The official
+launcher installs the base game plus a single default (Chinese) voice and lets the in-game updater fetch the
+other languages (Japanese / English / Korean) on demand, so a fresh official install lists those three with a
+download size. The plugin mirrors this: it installs the base game plus the default Chinese voice (`pakchunk101`,
+kept via `DeferredContentKeepMarkers`) and **defers** the other packs (`pakchunk102/103/104` = JP/EN/KR under
+`Content/TagPatchPaks/`, matched by `DeferredContentPathMarkers`), so an NTE install is ~5 GB smaller than
+bundling every language. This works because the **default auto-click launch path** (below) lets `NTEGame.exe`
+run its normal in-process resource/voice reconciliation — the very step `/autoplay` skips — so it fetches each
+deferred language on demand. To keep that reconciliation from looping on "更新失败" (update failed), the plugin
+forges the native `PatcherSDK` state files (`config.xml` / `ResList.xml` / `tmp\client.xml`) after each
+install/update (`WritePatcherState = true`), recording the base build plus the default voice as installed and
+the deferred languages as not-yet-installed; without it the patcher would see local version 0.0, decide the
+whole build is missing and loop. (An earlier version paired this deferral with dropping `/autoplay`; because
+`/autoplay` skips the in-process updater the voices never reconciled and the game looped on "更新失败", so it was
+reverted in favour of bundling every voice. The current DLL-injection auto-click path runs that updater, so the
+on-demand feature is restored.)
 
 **Launcher auto-click (DLL injection) — the default launch path.** Passing `/autoplay` auto-starts the game but
 has a side effect: on NTE it makes `NTEGame.exe` skip its in-process resource updater (the voice pitfall above).

@@ -58,12 +58,12 @@ public partial class NteCnPresetConfig : PluginPresetConfigBase
         // and then just waits for a manual "开始游戏" click). "/launcher /directly" reproduces the shim's normal
         // invocation so NTEGame.exe does not self-relaunch through the shim (which would strip the flag); "/autoplay"
         // is the auto-start override. This trio is exactly what the shim produces today (see LauncherAppName note).
-        // Skipping the updater has a trade-off: the vendor/in-game updater is also what would reconcile and fetch the
-        // per-language voice packs on demand, so with /autoplay the plugin must instead ship EVERY voice language
-        // itself at install time (see below — no deferral, no forged patcher state). An earlier attempt to defer the
-        // non-default voices and drop /autoplay so the vendor updater could fetch them on demand was ABANDONED: it
-        // left the game looping on "更新失败" after returning to login and showing every voice language without a size
-        // (see README "Known issues"). (P5X likewise REQUIRES /autoplay; see P5xCnPresetConfig.)
+        // Skipping the updater matters for voices: that in-process updater is also what reconciles and fetches the
+        // per-language voice packs on demand. This "/autoplay" is now the FALLBACK, not the default — the auto-click
+        // path below presses "开始游戏" so NTEGame runs that updater. The plugin therefore installs only the base game +
+        // the default Chinese voice and DEFERS the rest (see DeferredContent* + WritePatcherState below), which the
+        // auto-click default reconciles on demand; on this raw "/autoplay" fallback the updater is skipped, so the
+        // deferred voices are not fetched in-game. (P5X likewise REQUIRES /autoplay; see P5xCnPresetConfig.)
         LaunchArguments                  = "/launcher /directly /autoplay",
         // Silent-launch: patch the launcher's own settings so it auto-logs-in, auto-starts the game (no "Start"
         // click) and quits together with the game (no reappear afterwards).
@@ -73,19 +73,23 @@ public partial class NteCnPresetConfig : PluginPresetConfigBase
         // ---- DLL-injection auto-click launch path (ON by default; see README "异环 auto-click") ----
         // When enabled AND Collapse runs elevated, the plugin injects PwAutoClick.dll into NTEGame.exe and presses the
         // real "开始游戏" button via Qt meta-object invocation once NTEGame logs it is ready — instead of "/autoplay".
-        // This makes NTEGame run its normal in-process resource check first (the step "/autoplay" skips). Set to false
-        // to fall back to the older "/autoplay + all voices bundled" behaviour. Also auto-falls-back to "/autoplay" when
+        // This makes NTEGame run its normal in-process resource check first (the step "/autoplay" skips) — the step that
+        // reconciles and fetches the deferred non-default voices on demand. Set to false to force the raw "/autoplay"
+        // fallback (which skips that updater, so the deferred voices are not fetched). Also auto-falls-back to "/autoplay" when
         // it cannot activate (not elevated / DLL missing), or to a visible launcher for a manual click if only the
         // injection failed. The context object ("BackgroudStageScheduler"), method ("gameActionBtnClicked") and ready
         // marker ("all ready, wait for start game") use the shared pw_sdk defaults in PerfectWorldGameConfig.
         LauncherAutoClickEnabled            = true,
         LaunchArgumentsAutoClick            = "/launcher /directly",
         LauncherAutoClickSilentSettings     = [("autoLogin", "1"), ("autoRun", "0"), ("quitWithGame", "1"), ("showAfterGameQuit", "0")],
-        // NOTE: 异环 ships all voice languages under Content/TagPatchPaks/ (pakchunk101 = Chinese, 102/103/104 =
-        // JP/EN/KR). The plugin downloads them ALL at install/update time — there is deliberately no DeferredContent*
-        // filtering and no WritePatcherState here. Because /autoplay skips the in-process updater that would fetch a
-        // language on demand, bundling every voice up front is what keeps the game from looping on "更新失败"; it costs
-        // ~5 GB more than the official one-voice install (trade-off documented in the README "Known issues").
+        // On-demand voice: the auto-click launch path runs NTEGame's normal in-process resource/voice reconciliation
+        // (unlike /autoplay, which skips it), so the plugin ships only the base game + the default Chinese voice
+        // (pakchunk101) and DEFERS the other languages (102/103/104 = JP/EN/KR) under Content/TagPatchPaks/ for
+        // on-demand download in-game. WritePatcherState forges the native pw_sdk PatcherSDK state after install/update
+        // so the launcher's resource check sees the correct installed base+default-voice state instead of version 0.0.
+        DeferredContentPathMarkers          = ["/TagPatchPaks/"],
+        DeferredContentKeepMarkers          = ["/TagPatchPaks/pakchunk101"],
+        WritePatcherState                   = true,
     };
 
     private static readonly PerfectWorldNewsConfig NteNewsConfig = new()

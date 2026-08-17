@@ -1,4 +1,5 @@
 using System;
+using System.Buffers.Binary;
 using System.IO;
 using System.IO.Compression;
 using System.Security.Cryptography;
@@ -8,8 +9,9 @@ namespace Hi3Helper.PerfectWorld.Core.Utils;
 
 /// <summary>
 ///     Codec for Perfect World <c>pw_sdk</c> / <c>PatcherSDK</c> "PatcherXML0" encrypted manifests
-///     (e.g. <c>ResList.bin</c>, <c>lastdiff.bin</c>, <c>client.xml</c>). Decodes vendor-authored blobs into the
-///     UTF-8 XML manifests the plugin reads to enumerate the game's files.
+///     (e.g. <c>ResList.bin</c>, <c>lastdiff.bin</c>, <c>client.xml</c>). Decodes vendor-authored blobs and
+///     (via <see cref="EncodeFromXml"/>) re-encodes the local <c>ResList.xml</c> patcher-state file the plugin
+///     forges after a direct download so the native patcher accepts the install.
 /// </summary>
 /// <remarks>
 ///     <para>Container layout:</para>
@@ -51,6 +53,39 @@ public static class PatcherXml0
     public static string DecodeFileToXml(string filePath, string appId)
     {
         return DecodeToXml(File.ReadAllBytes(filePath), appId);
+    }
+
+    /// <summary>
+    ///     Encodes a UTF-8 XML string into a PatcherXML0 container. This is the exact inverse of
+    ///     <see cref="DecodeToXml"/> and is used to write the local <c>ResList.xml</c> patcher-state file the
+    ///     native pw_sdk PatcherSDK reads on game launch (which the plugin must forge because it downloads the
+    ///     game directly, bypassing the vendor patcher that would normally author it).
+    /// </summary>
+    public static byte[] EncodeFromXml(string xml, string appId)
+    {
+        if (xml == null) throw new ArgumentNullException(nameof(xml));
+        return EncodeFromBytes(Encoding.UTF8.GetBytes(xml), appId);
+    }
+
+    /// <summary>
+    ///     Encodes raw payload bytes into a PatcherXML0 container: <c>zlib.deflate(payload)</c> →
+    ///     <c>AES-128-CBC</c> encrypt (PKCS7) → prepend the 16-byte header. The stored inflated-size field is the
+    ///     length of <paramref name="payload"/>, so a subsequent <see cref="DecodeToBytes"/> validates cleanly.
+    /// </summary>
+    public static byte[] EncodeFromBytes(byte[] payload, string appId)
+    {
+        if (payload == null) throw new ArgumentNullException(nameof(payload));
+
+        byte[] deflated = Deflate(payload);
+        byte[] cipher = EncryptAes(deflated, BuildKey(appId));
+
+        var result = new byte[HeaderLength + cipher.Length];
+        // 12-byte magic ("PatcherXML0" + NUL) then bytes 12..15 = inflated size (uint32 LE); the rest is ciphertext.
+        Encoding.ASCII.GetBytes(Magic, 0, Magic.Length, result, 0);
+        result[Magic.Length] = 0;
+        BinaryPrimitives.WriteUInt32LittleEndian(result.AsSpan(12), (uint)payload.Length);
+        Buffer.BlockCopy(cipher, 0, result, HeaderLength, cipher.Length);
+        return result;
     }
 
     /// <summary>
@@ -103,12 +138,35 @@ public static class PatcherXml0
         return decryptor.TransformFinalBlock(buffer, offset, length);
     }
 
+    private static byte[] EncryptAes(byte[] plaintext, byte[] key)
+    {
+        using var aes = Aes.Create();
+        aes.KeySize = 128;
+        aes.Key = key;
+        aes.IV = IvBytes;
+        aes.Mode = CipherMode.CBC;
+        aes.Padding = PaddingMode.PKCS7;
+
+        using var encryptor = aes.CreateEncryptor();
+        return encryptor.TransformFinalBlock(plaintext, 0, plaintext.Length);
+    }
+
     private static byte[] Inflate(byte[] zlibData)
     {
         using var input = new MemoryStream(zlibData, false);
         using var zlib = new ZLibStream(input, CompressionMode.Decompress);
         using var output = new MemoryStream();
         zlib.CopyTo(output);
+        return output.ToArray();
+    }
+
+    private static byte[] Deflate(byte[] raw)
+    {
+        using var output = new MemoryStream();
+        // Dispose the ZLibStream (via the using scope) before ToArray so its final block + Adler-32 trailer are
+        // flushed; leaveOpen keeps the backing MemoryStream readable afterwards.
+        using (var zlib = new ZLibStream(output, CompressionLevel.Optimal, leaveOpen: true))
+            zlib.Write(raw, 0, raw.Length);
         return output.ToArray();
     }
 
