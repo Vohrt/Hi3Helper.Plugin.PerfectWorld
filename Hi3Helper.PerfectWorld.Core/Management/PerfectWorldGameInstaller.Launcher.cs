@@ -72,13 +72,17 @@ public partial class PerfectWorldGameInstaller
     }
 
     /// <summary>
-    ///     Classifies every launcher file as already-present (correct size, and correct MD5 when
-    ///     <paramref name="verifyHash"/> is set) or needing download, returning the resulting <see cref="LauncherPlan"/>.
+    ///     Classifies every launcher file as already-present (correct size AND matching MD5) or needing download,
+    ///     returning the resulting <see cref="LauncherPlan"/>. Launcher files are ALWAYS hash-verified — unlike the
+    ///     multi-GB game tree, which the installer may size-trust on a fresh install for speed. The launcher is small,
+    ///     and its version-bearing files (e.g. <c>Config\Config.ini</c>) keep a CONSTANT size across launcher versions
+    ///     (only their <c>[VERSION]</c> text changes), so a size-only check can never detect a launcher self-update and
+    ///     would leave the vendor launcher stale — re-triggering its self-update prompt and looping "Update available".
     ///     Pass <paramref name="prefetchedManifest"/> to reuse an already-downloaded launcher manifest (so the verify
     ///     total can be computed before this call) and <paramref name="onFileVerified"/> to receive a callback as each
     ///     launcher file is checked, which lets the caller advance the live "Verifying: X / Y" count.
     /// </summary>
-    private async Task<LauncherPlan> PrepareLauncherPlanAsync(string installPath, bool verifyHash,
+    private async Task<LauncherPlan> PrepareLauncherPlanAsync(string installPath,
         CancellationToken token, PerfectWorldLauncherManifest? prefetchedManifest = null,
         Action? onFileVerified = null)
     {
@@ -102,10 +106,13 @@ public partial class PerfectWorldGameInstaller
                 ok = false;
             else if (new FileInfo(destPath).Length != file.Size)
                 ok = false;
-            else if (verifyHash && file.Size != 0) // zero-size entries have an unreliable manifest Checksum
+            else if (file.Size != 0) // zero-size entries have an unreliable manifest Checksum
+                // Always hash-verify launcher files: a size-only check can never catch a launcher self-update because
+                // version-bearing files such as Config\Config.ini keep the same size across versions (only their
+                // [VERSION] text changes), which would leave the vendor launcher stale and loop "Update available".
                 ok = await CheckMd5Async(destPath, file.Md5, token).ConfigureAwait(false);
             else
-                ok = true; // trust a size match on a fresh install (or for verified-empty files)
+                ok = true; // verified-empty files only
 
             if (ok)
             {

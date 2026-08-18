@@ -247,7 +247,7 @@ public partial class PerfectWorldGameInstaller
         // The vendor launcher (NTELauncher\) is required at runtime; make sure it is present/up-to-date on updates
         // too (its self-update manifest may bump versions independently of the game resources).
         LauncherPlan launcherPlan =
-            await PrepareLauncherPlanAsync(installPath, verifyHash: true, token,
+            await PrepareLauncherPlanAsync(installPath, token,
                 launcherManifest, () => ReportVerified(1)).ConfigureAwait(false);
 
         totalTransfer += pakTransfer + launcherPlan.ToDownloadZipBytes;
