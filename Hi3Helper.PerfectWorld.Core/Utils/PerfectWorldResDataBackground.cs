@@ -65,23 +65,12 @@ public static class PerfectWorldResDataBackground
 
         string outPng    = Path.Combine(cacheDir, cacheBaseName + ".png");
         string outMeta   = Path.Combine(cacheDir, cacheBaseName + ".meta");
-        string signature = info.Length.ToString(System.Globalization.CultureInfo.InvariantCulture) + ":" +
-                           info.LastWriteTimeUtc.Ticks.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        string signature = BuildPackSignature(info);
 
         // Cache hit: an already-extracted PNG whose meta matches the current pack signature.
-        if (File.Exists(outPng) && File.Exists(outMeta))
+        if (TryReadValidCache(outPng, outMeta, signature))
         {
-            try
-            {
-                if (string.Equals(File.ReadAllText(outMeta), signature, StringComparison.Ordinal))
-                {
-                    return outPng;
-                }
-            }
-            catch
-            {
-                // Fall through and re-extract on any cache-read failure.
-            }
+            return outPng;
         }
 
         byte[] data;
@@ -226,5 +215,60 @@ public static class PerfectWorldResDataBackground
         }
 
         return -1;
+    }
+
+    /// <summary>
+    ///     Returns the already-extracted background PNG for <paramref name="datPath"/> only when a cached copy exists
+    ///     AND its meta sidecar matches the pack's current size + last-write-time signature; otherwise
+    ///     <see langword="null"/>. This lets a caller adopt a previously-extracted background without re-scanning the
+    ///     ~30&#8211;MB pack, while guaranteeing a stale cache from a previous pack/version is never served (which would
+    ///     otherwise leave the launcher showing an outdated key-visual after a game/launcher update).
+    /// </summary>
+    public static string? TryGetValidCachedBackground(string datPath, string cacheDir, string cacheBaseName)
+    {
+        if (string.IsNullOrEmpty(datPath) || !File.Exists(datPath))
+        {
+            return null;
+        }
+
+        FileInfo info;
+        try
+        {
+            info = new FileInfo(datPath);
+        }
+        catch
+        {
+            return null;
+        }
+
+        string outPng  = Path.Combine(cacheDir, cacheBaseName + ".png");
+        string outMeta = Path.Combine(cacheDir, cacheBaseName + ".meta");
+        return TryReadValidCache(outPng, outMeta, BuildPackSignature(info)) ? outPng : null;
+    }
+
+    /// <summary>Cache signature for a pack: its byte length and UTC last-write ticks, joined by a colon.</summary>
+    private static string BuildPackSignature(FileInfo info) =>
+        info.Length.ToString(System.Globalization.CultureInfo.InvariantCulture) + ":" +
+        info.LastWriteTimeUtc.Ticks.ToString(System.Globalization.CultureInfo.InvariantCulture);
+
+    /// <summary>
+    ///     <see langword="true"/> when both the cached PNG and its meta sidecar exist and the meta equals
+    ///     <paramref name="signature"/> (the current pack signature). Any read failure is treated as a cache miss.
+    /// </summary>
+    private static bool TryReadValidCache(string outPng, string outMeta, string signature)
+    {
+        if (!File.Exists(outPng) || !File.Exists(outMeta))
+        {
+            return false;
+        }
+
+        try
+        {
+            return string.Equals(File.ReadAllText(outMeta), signature, StringComparison.Ordinal);
+        }
+        catch
+        {
+            return false;
+        }
     }
 }

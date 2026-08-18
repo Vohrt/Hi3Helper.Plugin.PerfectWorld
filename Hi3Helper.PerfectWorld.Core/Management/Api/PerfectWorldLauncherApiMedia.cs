@@ -236,23 +236,34 @@ public partial class PerfectWorldLauncherApiMedia : LauncherApiMediaBase
 
     /// <summary>
     ///     Cache-only fast path used by the synchronous background getters: adopts a previously-extracted local
-    ///     background PNG without re-scanning the pack. Covers the rare case where the host queries backgrounds
-    ///     before <see cref="InitAsync"/> could resolve the install path.
+    ///     background PNG without re-scanning the pack, but ONLY when it matches the currently-installed pack (size +
+    ///     last-write-time). Validating the signature here is essential: a bare "file exists" check would adopt a stale
+    ///     cache left by an earlier game/launcher version, set <see cref="_localBackgroundResolved"/> and thereby block
+    ///     the async re-extraction in <see cref="TryResolveLocalBackgroundImage"/> — leaving the launcher stuck showing
+    ///     the previous key-visual. A stale/absent cache is left for that async path to refresh.
     /// </summary>
     private void TryUseCachedLocalBackgroundImage()
     {
         if (_localBackgroundResolved || !string.IsNullOrEmpty(_backgroundImagePath) ||
-            string.IsNullOrEmpty(_config.LocalBackgroundResPackRelativePath))
+            string.IsNullOrEmpty(_config.LocalBackgroundResPackRelativePath) || _gameManager is null)
         {
             return;
         }
 
-        string cachedPng = Path.Combine(
-            Path.GetTempPath(), "CollapsePerfectWorldMedia", _config.AppId, LocalBackgroundCacheName + ".png");
-
-        if (File.Exists(cachedPng))
+        _gameManager.GetGamePath(out string? installPath);
+        if (string.IsNullOrEmpty(installPath))
         {
-            _backgroundImagePath     = cachedPng;
+            return;
+        }
+
+        string packPath = Path.Combine(installPath, _config.LocalBackgroundResPackRelativePath);
+        string cacheDir = Path.Combine(Path.GetTempPath(), "CollapsePerfectWorldMedia", _config.AppId);
+
+        string? cached = PerfectWorldResDataBackground.TryGetValidCachedBackground(
+            packPath, cacheDir, LocalBackgroundCacheName);
+        if (!string.IsNullOrEmpty(cached))
+        {
+            _backgroundImagePath     = cached;
             _localBackgroundResolved = true;
         }
     }
