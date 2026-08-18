@@ -181,11 +181,12 @@ public partial class PerfectWorldGameManager : GameManagerBase
     protected override Task<int> InitAsync(CancellationToken token) => InitAsyncInner(true, token);
 
     /// <summary>
-    ///     Compares the vendor launcher version that is installed on disk against the version currently advertised on
-    ///     the CDN. Returns <see langword="true"/> when the installed launcher is absent or older than the remote one
-    ///     (i.e. its <c>Version.ini</c> does not exist, or its <c>Build</c>/<c>FileListURL</c> version segment differs
-    ///     from the remote one). A network failure or any other transient error is treated as "no update known" so an
-    ///     unreachable CDN never blocks a launch.
+    ///     Determines whether the installed vendor launcher is older than the build advertised on the CDN by comparing
+    ///     the launcher's own local version record (<see cref="PerfectWorldGameConfig.LauncherVersionIniRelativePath"/>,
+    ///     i.e. <c>{LauncherRootDirName}\Config\Config.ini</c> → <c>[VERSION]</c>) against the remote <c>Version.ini</c>.
+    ///     Returns <see langword="true"/> when the local <c>Version</c>/<c>Build</c> differ from the remote ones. A
+    ///     missing local record (launcher not laid down yet), an unreadable version on either side, or any network/other
+    ///     transient failure is treated as "no update known" so an unreachable CDN never blocks a launch.
     /// </summary>
     private async Task<bool> CheckLauncherHasUpdateAsync(CancellationToken token)
     {
@@ -193,7 +194,7 @@ public partial class PerfectWorldGameManager : GameManagerBase
 
         try
         {
-            // Fetch the remote Version.ini to get the current launcher version directory.
+            // Fetch the remote launcher Version.ini (the vendor's own self-update descriptor).
             byte[]? remoteBytes = null;
             foreach (string cdn in _config.LauncherCdnUrls)
             {
@@ -213,32 +214,43 @@ public partial class PerfectWorldGameManager : GameManagerBase
             if (remoteBytes == null) return false;
 
             string remoteIni = System.Text.Encoding.UTF8.GetString(remoteBytes);
-            (string? remoteFileListUrl, _, _) = PerfectWorldLauncherManifestParser.ParseVersionIni(remoteIni);
-            if (string.IsNullOrEmpty(remoteFileListUrl)) return false;
-            string? remoteVersionDir = PerfectWorldLauncherManifestParser.ExtractVersionDir(remoteFileListUrl);
-            if (string.IsNullOrEmpty(remoteVersionDir)) return false;
+            (string? remoteVersion, string? remoteBuild) =
+                PerfectWorldLauncherManifestParser.ParseSectionVersionBuild(remoteIni);
+            // Without any remote version there is nothing to compare against.
+            if (string.IsNullOrEmpty(remoteVersion) && string.IsNullOrEmpty(remoteBuild)) return false;
 
-            // Read the local launcher Version.ini written by the launcher's own self-updater after it installs.
+            // The vendor launcher records its currently-installed build in {LauncherRootDirName}\Config\Config.ini
+            // (NOT a top-level Version.ini — that file does not exist for these titles). The plugin downloads this file
+            // as part of the launcher self-update manifest (AllFiles.xml) and the vendor patcher rewrites it after a
+            // self-update, so it always reflects the launcher that is actually installed on disk.
             string localVersionIniPath = Path.Combine(CurrentGameInstallPath,
-                _config.LauncherRootDirName, "Version.ini");
+                _config.LauncherRootDirName, _config.LauncherVersionIniRelativePath);
             if (!File.Exists(localVersionIniPath))
             {
-                // No local Version.ini: launcher is either freshly installed by the plugin (pre-first-run) or absent.
-                // Treat as no update needed — the installer already laid down the correct version.
+                // No local record: the launcher has not been laid down yet (pre-first-run). Treat as up-to-date — the
+                // installer already fetches the current launcher build.
                 return false;
             }
 
             string localIni = await File.ReadAllTextAsync(localVersionIniPath, token).ConfigureAwait(false);
-            (string? localFileListUrl, _, _) = PerfectWorldLauncherManifestParser.ParseVersionIni(localIni);
-            string? localVersionDir = string.IsNullOrEmpty(localFileListUrl)
-                ? null
-                : PerfectWorldLauncherManifestParser.ExtractVersionDir(localFileListUrl);
+            (string? localVersion, string? localBuild) =
+                PerfectWorldLauncherManifestParser.ParseSectionVersionBuild(localIni);
+            // An unreadable local version is treated as up-to-date so a parse quirk can never wedge a permanent
+            // "update available" state that the user would be unable to clear.
+            if (string.IsNullOrEmpty(localVersion) && string.IsNullOrEmpty(localBuild)) return false;
 
-            bool hasUpdate = !string.Equals(localVersionDir, remoteVersionDir, StringComparison.OrdinalIgnoreCase);
+            bool buildDiffers = !string.IsNullOrEmpty(remoteBuild) &&
+                                !string.Equals(localBuild, remoteBuild, StringComparison.OrdinalIgnoreCase);
+            bool versionDiffers = !string.IsNullOrEmpty(remoteVersion) &&
+                                  !string.Equals(localVersion, remoteVersion, StringComparison.OrdinalIgnoreCase);
+            bool hasUpdate = buildDiffers || versionDiffers;
+
             if (hasUpdate)
                 SharedStatic.InstanceLogger.LogInformation(
-                    "[PerfectWorldManager] Launcher update available: local={Local} remote={Remote}",
-                    localVersionDir ?? "(none)", remoteVersionDir);
+                    "[PerfectWorldManager] Launcher update available: local={LocalVersion} (build {LocalBuild}) " +
+                    "remote={RemoteVersion} (build {RemoteBuild}).",
+                    localVersion ?? "(none)", localBuild ?? "(none)",
+                    remoteVersion ?? "(none)", remoteBuild ?? "(none)");
 
             return hasUpdate;
         }

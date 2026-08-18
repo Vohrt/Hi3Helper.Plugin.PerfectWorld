@@ -103,6 +103,18 @@ public sealed class PerfectWorldGameConfig
     public string LauncherLogRelativePath { get; init; } = Path.Combine("UserData", "Log", "NTEGame.log");
 
     /// <summary>
+    ///     Path (relative to the vendor launcher directory, i.e. <see cref="LauncherRootDirName"/>) of the launcher's
+    ///     own version record. Its <c>[VERSION]</c> section (<c>Version</c>/<c>Build</c>) tracks the currently
+    ///     installed launcher build: the plugin downloads this file as part of the launcher self-update manifest and
+    ///     the vendor patcher rewrites it after a self-update, so it always reflects what is installed on disk. It is
+    ///     compared against the remote <c>Version.ini</c> to decide whether the launcher's self-update should be
+    ///     surfaced as "Update available" (and applied through the plugin) instead of letting the outdated vendor
+    ///     launcher block the auto-click path with its own self-update prompt. Both 异环/NTE and P5X use
+    ///     <c>Config\Config.ini</c> (NOT a top-level <c>Version.ini</c>).
+    /// </summary>
+    public string LauncherVersionIniRelativePath { get; init; } = Path.Combine("Config", "Config.ini");
+
+    /// <summary>
     ///     Optional install-relative path to the vendor's proprietary <c>qres</c> resource pack from which the
     ///     home-screen background image is extracted when the launcher CDN publishes no dynamic <c>bgimgs/</c>
     ///     folder, e.g. <c>P5XLaunch\ResData\1264.dat</c> for P5X. Left <see langword="null"/> for games (such as

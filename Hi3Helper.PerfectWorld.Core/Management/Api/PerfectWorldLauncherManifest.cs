@@ -71,6 +71,44 @@ public static class PerfectWorldLauncherManifestParser
     }
 
     /// <summary>
+    ///     Reads the informational <c>Version</c> and <c>Build</c> values from a single INI section (default
+    ///     <c>VERSION</c>). Unlike <see cref="ParseVersionIni"/> (which scans the whole file for those keys), this is
+    ///     scoped to one section so it can be used on multi-section vendor files such as the launcher's local
+    ///     <c>Config\Config.ini</c> without accidentally picking up same-named keys from an unrelated section.
+    /// </summary>
+    public static (string? Version, string? Build) ParseSectionVersionBuild(string ini, string section = "VERSION")
+    {
+        string? version = null, build = null;
+        bool inSection = false;
+
+        foreach (string rawLine in ini.TrimStart('\uFEFF').Split('\n'))
+        {
+            string line = rawLine.Trim();
+            if (line.Length == 0 || line[0] is ';' or '#') continue;
+
+            if (line[0] == '[')
+            {
+                // Section header, e.g. "[VERSION]" → "VERSION".
+                inSection = line.Trim('[', ']', ' ', '\t', '\r').Equals(section, StringComparison.OrdinalIgnoreCase);
+                continue;
+            }
+
+            if (!inSection) continue;
+
+            int eq = line.IndexOf('=');
+            if (eq <= 0) continue;
+
+            string key = line[..eq].Trim();
+            string value = line[(eq + 1)..].Trim();
+
+            if (key.Equals("Version", StringComparison.OrdinalIgnoreCase)) version ??= value;
+            else if (key.Equals("Build", StringComparison.OrdinalIgnoreCase)) build ??= value;
+        }
+
+        return (version, build);
+    }
+
+    /// <summary>
     ///     Extracts the versioned directory segment (the one immediately before <c>AllFiles.xml</c>) from a
     ///     <c>FileListURL</c>, e.g. <c>https://.../launcher/1.0.6.0718_2/AllFiles.xml</c> → <c>1.0.6.0718_2</c>.
     /// </summary>
