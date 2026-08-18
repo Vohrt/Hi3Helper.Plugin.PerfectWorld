@@ -17,13 +17,13 @@ namespace Hi3Helper.PerfectWorld.Core.Management.Api;
 /// <remarks>
 ///     <para>
 ///         Both files describe the <em>installed</em> state. The generated state records the whole base build as
-///         installed, plus every voice/tag language whose files are actually present on disk (the plugin keeps the
-///         single default language and defers the rest). Each installed language is emitted as a
-///         <c>&lt;BaseVerson&gt;</c> section in <c>config.xml</c> and a matching <c>&lt;BaseVersion&gt;</c> block in
-///         <c>ResList.xml</c>, exactly as the official launcher leaves behind for a fresh install with one voice
-///         selected: the client then plays that voice, shows every other language as available-for-download (with a
-///         size) and pulls a chosen one on demand — instead of the broken state where the patcher sees local
-///         version 0.0, believes the entire build is missing and loops on "更新失败".
+///         installed, plus every voice/tag language whose files are actually present on disk (for NTE that is none —
+///         it defers every voice — but the mechanism supports keeping one or more). Each installed language is
+///         emitted as a <c>&lt;BaseVerson&gt;</c> section in <c>config.xml</c> and a matching <c>&lt;BaseVersion&gt;</c>
+///         block in <c>ResList.xml</c>, exactly as the official launcher leaves behind: the client shows every
+///         not-yet-installed language as available-for-download (with a size) and pulls the one it selects on demand —
+///         instead of the broken state where the patcher sees local version 0.0, believes the entire build is missing
+///         and loops on "更新失败".
 ///     </para>
 ///     <para>
 ///         The local <c>ResList.xml</c> is built from the same filtered file set the installer actually wrote to

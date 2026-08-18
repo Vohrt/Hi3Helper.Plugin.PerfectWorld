@@ -60,10 +60,10 @@ public partial class NteCnPresetConfig : PluginPresetConfigBase
         // is the auto-start override. This trio is exactly what the shim produces today (see LauncherAppName note).
         // Skipping the updater matters for voices: that in-process updater is also what reconciles and fetches the
         // per-language voice packs on demand. This "/autoplay" is now the FALLBACK, not the default — the auto-click
-        // path below presses "开始游戏" so NTEGame runs that updater. The plugin therefore installs only the base game +
-        // the default Chinese voice and DEFERS the rest (see DeferredContent* + WritePatcherState below), which the
-        // auto-click default reconciles on demand; on this raw "/autoplay" fallback the updater is skipped, so the
-        // deferred voices are not fetched in-game. (P5X likewise REQUIRES /autoplay; see P5xCnPresetConfig.)
+        // path below presses "开始游戏" so NTEGame runs that updater. The plugin therefore installs only the base game
+        // and DEFERS every voice pack (see DeferredContent* + WritePatcherState below), which the auto-click default
+        // reconciles on demand (downloading the system-language voice); on this raw "/autoplay" fallback the updater is
+        // skipped, so the deferred voices are not fetched in-game. (P5X likewise REQUIRES /autoplay; see P5xCnPresetConfig.)
         LaunchArguments                  = "/launcher /directly /autoplay",
         // Silent-launch: patch the launcher's own settings so it auto-logs-in, auto-starts the game (no "Start"
         // click) and quits together with the game (no reappear afterwards).
@@ -74,7 +74,7 @@ public partial class NteCnPresetConfig : PluginPresetConfigBase
         // When enabled AND Collapse runs elevated, the plugin injects PwAutoClick.dll into NTEGame.exe and presses the
         // real "开始游戏" button via Qt meta-object invocation once NTEGame logs it is ready — instead of "/autoplay".
         // This makes NTEGame run its normal in-process resource check first (the step "/autoplay" skips) — the step that
-        // reconciles and fetches the deferred non-default voices on demand. Set to false to force the raw "/autoplay"
+        // reconciles and fetches the deferred voices on demand. Set to false to force the raw "/autoplay"
         // fallback (which skips that updater, so the deferred voices are not fetched). Also auto-falls-back to "/autoplay" when
         // it cannot activate (not elevated / DLL missing), or to a visible launcher for a manual click if only the
         // injection failed. The context object ("BackgroudStageScheduler"), method ("gameActionBtnClicked") and ready
@@ -83,12 +83,15 @@ public partial class NteCnPresetConfig : PluginPresetConfigBase
         LaunchArgumentsAutoClick            = "/launcher /directly",
         LauncherAutoClickSilentSettings     = [("autoLogin", "1"), ("autoRun", "0"), ("quitWithGame", "1"), ("showAfterGameQuit", "0")],
         // On-demand voice: the auto-click launch path runs NTEGame's normal in-process resource/voice reconciliation
-        // (unlike /autoplay, which skips it), so the plugin ships only the base game + the default Chinese voice
-        // (pakchunk101) and DEFERS the other languages (102/103/104 = JP/EN/KR) under Content/TagPatchPaks/ for
-        // on-demand download in-game. WritePatcherState forges the native pw_sdk PatcherSDK state after install/update
-        // so the launcher's resource check sees the correct installed base+default-voice state instead of version 0.0.
+        // (unlike /autoplay, which skips it), so the plugin ships ONLY the base game and DEFERS every per-language
+        // voice pack (pakchunk101/102/103/104 = CN/JP/EN/KR) under Content/TagPatchPaks/ for on-demand download
+        // in-game. No voice is installed up-front (DeferredContentKeepMarkers is empty): NTEGame's initialization
+        // selects and downloads the voice matching the current system language, which is the most appropriate default
+        // and avoids forcing Chinese on non-Chinese systems. WritePatcherState forges the native pw_sdk PatcherSDK
+        // state after install/update so the launcher's resource check sees the base build as installed (with no voice
+        // yet, i.e. an empty <BaseVerson>) instead of version 0.0, so it fetches the selected voice instead of looping.
         DeferredContentPathMarkers          = ["/TagPatchPaks/"],
-        DeferredContentKeepMarkers          = ["/TagPatchPaks/pakchunk101"],
+        DeferredContentKeepMarkers          = [],
         WritePatcherState                   = true,
     };
 

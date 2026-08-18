@@ -126,9 +126,8 @@ public sealed class PerfectWorldGameConfig
     ///     Install-relative path substrings whose matching manifest content is deferred (NOT fetched at install
     ///     time) because it is optional, on-demand content. For 异环/NTE this is <c>["/TagPatchPaks/"]</c>: the
     ///     per-language voice packs (<c>pakchunk101</c> = Chinese, <c>102/103/104</c> = Japanese/English/Korean)
-    ///     live there. The plugin still installs the single default-language voice the game requires to run (see
-    ///     <see cref="DeferredContentKeepMarkers"/>) and defers the rest for on-demand download in-game, mirroring
-    ///     the official launcher, which ships exactly one voice language and offers the others for later download.
+    ///     live there. NTE defers every voice pack and lets the in-game updater fetch the one matching the current
+    ///     system language on demand (see <see cref="DeferredContentKeepMarkers"/> for the optional keep exceptions).
     ///     Matching is a case-insensitive substring test against the forward-slash manifest path. Empty (the
     ///     default) downloads the entire manifest, so games without an on-demand channel (e.g. P5X, whose Zeus asset
     ///     system already ships no voice in the pw_sdk manifest) are unaffected.
@@ -137,12 +136,12 @@ public sealed class PerfectWorldGameConfig
 
     /// <summary>
     ///     Exceptions to <see cref="DeferredContentPathMarkers"/>: install-relative path substrings that are kept
-    ///     (downloaded) even though they also match a defer marker. This installs the single default-language voice
-    ///     the game must have present to launch without looping on "更新失败", while every other language under the
-    ///     same deferred directory stays deferred. For 异环/NTE this is <c>["/TagPatchPaks/pakchunk101"]</c> (the
-    ///     Chinese voice, <c>pakchunk101</c>) — matching the official install, which keeps exactly that one. A path
-    ///     is deferred only when it matches a marker in <see cref="DeferredContentPathMarkers"/> AND matches none
-    ///     here. Empty (the default) keeps nothing extra, so a fresh language the vendor adds later is auto-deferred.
+    ///     (downloaded) even though they also match a defer marker. Use this to force a specific language to always
+    ///     be pre-installed while every other language under the same deferred directory stays deferred. Empty (the
+    ///     default) keeps nothing extra, so ALL matched content is deferred — which is what 异环/NTE uses, letting the
+    ///     game download the voice matching the current system language at initialization rather than pre-installing
+    ///     one. A path is deferred only when it matches a marker in <see cref="DeferredContentPathMarkers"/> AND
+    ///     matches none here.
     /// </summary>
     public string[] DeferredContentKeepMarkers { get; init; } = [];
 
@@ -153,11 +152,11 @@ public sealed class PerfectWorldGameConfig
     ///     native patcher (e.g. 异环/NTE): because the plugin downloads game files directly it never runs the vendor
     ///     patcher that would normally author these files, so without them the patcher sees local version 0.0, decides
     ///     the whole build is missing and loops on "更新失败" (update failed). The forged state records the base build
-    ///     as installed together with the single default-language voice the plugin keeps (see
-    ///     <see cref="DeferredContentKeepMarkers"/>) as an installed <c>&lt;BaseVerson&gt;</c> section, and records the
-    ///     deferred languages as NOT installed, so the client plays the default voice and offers each other language
-    ///     for on-demand download in-game. Left <see langword="false"/> (the default) for titles that do not need it
-    ///     (e.g. P5X), leaving their flow unchanged.
+    ///     as installed, plus one installed <c>&lt;BaseVerson&gt;</c> section per voice/tag language actually kept on
+    ///     disk (see <see cref="DeferredContentKeepMarkers"/>) — none when every voice is deferred, i.e. an empty
+    ///     <c>&lt;BaseVerson&gt;</c> — and treats the deferred languages as NOT installed, so the client fetches the
+    ///     language it selects for on-demand download in-game. Left <see langword="false"/> (the default) for titles
+    ///     that do not need it (e.g. P5X), leaving their flow unchanged.
     /// </summary>
     public bool WritePatcherState { get; init; }
 
@@ -182,7 +181,7 @@ public sealed class PerfectWorldGameConfig
     //   (GameClientAgent::beginCheckGameResVersion). For 异环/NTE that skip corrupts the per-language voice state, so
     //   with "/autoplay" the plugin has to bundle every voice language up front (~5 GB extra). Pressing the launcher's
     //   own "开始游戏" button instead runs the normal ready-check first (exactly like a human click), so on-demand voice
-    //   works and only the default language need be shipped.
+    //   works and no voice need be shipped up front (the game downloads the system-language voice itself).
     //
     //   When enabled AND the host is elevated, the plugin injects a tiny helper DLL (PwAutoClick.dll) into the Qt
     //   launcher, waits for the launcher to reach its "ready to start" log marker, then invokes the button's slot via
