@@ -18,7 +18,7 @@
         <Company>CollapsePlugin</Company>
         <Authors>$(Company).</Authors>
         <Copyright>Copyright 2026 $(Company)</Copyright>
-        <Version>1.0.0</Version>
+        <Version>0.2.9</Version>
         <ApplicationIcon>icon.ico</ApplicationIcon>
         <Configurations>Debug;Release;DebugNoReflection;ReleaseNoReflection</Configurations>
         <Title>Hi3Helper.Plugin.P5X</Title>
