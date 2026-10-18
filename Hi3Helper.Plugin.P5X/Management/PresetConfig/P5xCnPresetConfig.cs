@@ -73,6 +73,13 @@ public partial class P5xCnPresetConfig : PluginPresetConfigBase
         LauncherRootDirName              = "P5XLaunch",
         ContentRootDirName               = "client",
         LauncherLogRelativePath          = @"UserData\Log\P5XGame.log",
+        // Forge the native pw_sdk PatcherSDK state after every install/update, exactly like 异环. Without it the vendor
+        // launcher keeps its own, never-refreshed bookkeeping (`P5XLaunch\UserData\Patcher\PatcherSDK\config.xml`), so
+        // once the plugin performs a resource update the vendor patcher still believes the OLD version is installed and
+        // offers a bogus "开始更新" for the delta — while Collapse (which trusts the plugin's own marker) correctly says
+        // "up to date". Verified on 1.0.74 → 1.0.75: the vendor reported 13 MB to download even though every file was
+        // already updated. The generic writer handles P5X's shape (no paks, no voice sections → empty <BaseVerson>).
+        WritePatcherState                   = true,
         // P5X publishes no dynamic bgimgs/ folder (unlike 异环); its home key-visual lives inside the installed
         // vendor 'qres' resource pack. The media provider extracts the background from this pack post-install.
         LocalBackgroundResPackRelativePath = @"P5XLaunch\ResData\1264.dat",

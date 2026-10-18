@@ -74,7 +74,12 @@ public static class PerfectWorldPatcherState
         AppendLeafElement(sb, 1, "ResVersion", remote.ResVersion);
         AppendLeafElement(sb, 1, "AppVersion", "0.0");
         AppendLeafElement(sb, 1, "UpdateResVersion", "0.0");
-        AppendLeafElement(sb, 1, "Tag", tag);
+        // The vendor only writes <Tag> for titles whose catalog root declares a tag (异环/NTE). P5X's does not, and its
+        // own state omits the element entirely — keep the shape identical by skipping it when unknown.
+        if (!string.IsNullOrEmpty(tag))
+        {
+            AppendLeafElement(sb, 1, "Tag", tag);
+        }
         AppendLeafElement(sb, 1, "ResSize", remote.ResSize.ToString(CultureInfo.InvariantCulture));
         AppendLeafElement(sb, 1, "ResCount", resCountText);
         // Installed-tag sections: one <Res> per voice/tag language actually present on disk, so the in-game client
@@ -101,9 +106,15 @@ public static class PerfectWorldPatcherState
         sb.Append("    <Extra>\n");
         AppendLeafElement(sb, 2, "diffHash", remote.DiffHash);
         AppendLeafElement(sb, 2, "listHash", remote.ListHash);
-        sb.Append("        <BaseTag>\n");
-        sb.Append("            <item name=\"").Append(Escape(tag)).Append("\" />\n");
-        sb.Append("        </BaseTag>\n");
+        // Only games whose catalog carries a base tag (异环/NTE: "baseTag") get the <BaseTag> block; P5X's catalog root
+        // has no tag attribute at all and the vendor's own state omits it, so emitting an empty one would deviate from
+        // the shape the vendor wrote itself.
+        if (!string.IsNullOrEmpty(tag))
+        {
+            sb.Append("        <BaseTag>\n");
+            sb.Append("            <item name=\"").Append(Escape(tag)).Append("\" />\n");
+            sb.Append("        </BaseTag>\n");
+        }
         AppendLeafElement(sb, 2, "speed", "50");
         sb.Append("    </Extra>\n");
         AppendLeafElement(sb, 1, "Hash", hash);
