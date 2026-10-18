@@ -45,6 +45,10 @@ public partial class P5xCnPresetConfig : PluginPresetConfigBase
         GameResBranch                    = "CN_OB_OFFICIAL",
         Platform                         = "Windows",
         GameResCdnUrls                   = ["https://nsywl-client-dev1.wmupd.com/clientRes", "https://nsywl-client-dev2.wmupd.com/clientRes"],
+        // Same vendor mechanism as 异环: PatcherConfig.json (inside the launcher tree) declares the live resource
+        // branch; config.xml's <ResConfig> blob is the remote fallback. Both are read automatically, so a future
+        // branch move needs no plugin change.
+        LauncherPatcherConfigRelativePath = @"P5XLaunch\ResFilesM\1264\PatcherConfig\PatcherConfig.json",
         LauncherBranch                   = "P5XOB",
         LauncherCdnUrls                  = ["https://nsywl-client-dev1.wmupd.com/hd", "https://nsywl-client-dev2.wmupd.com/hd"],
         GameExecutableRelativePath       = ExEcutableName,

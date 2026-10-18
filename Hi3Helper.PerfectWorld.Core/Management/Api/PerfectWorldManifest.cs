@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Xml.Linq;
+using Hi3Helper.PerfectWorld.Core.Utils;
 
 namespace Hi3Helper.PerfectWorld.Core.Management.Api;
 
@@ -23,6 +24,18 @@ public sealed class PerfectWorldRemoteConfig
     /// <summary>MD5 of <c>lastdiff.bin</c> (integrity check for the incremental manifest).</summary>
     public string DiffHash { get; init; } = string.Empty;
 
+    /// <summary>
+    ///     The resource branch this build actually lives on, decoded from the base64 <c>&lt;ResConfig&gt;</c> JSON
+    ///     blob the CDN publishes inside <c>config.xml</c> (e.g. <c>PC_140</c>). Empty when the CDN publishes none.
+    /// </summary>
+    /// <remarks>
+    ///     This is how a <c>pw_sdk</c> title announces a resource-branch move (异环/NTE 1.4: <c>publish_PC</c> →
+    ///     <c>PC_140</c>): the old branch keeps serving its last <c>config.xml</c> forever, so a client that only ever
+    ///     reads the branch it was configured with stays frozen on the previous version. The official patcher follows
+    ///     this declaration (its log shows <c>"LocalBranch":"publish_PC" … "RemoteBranch":"PC_140"</c>).
+    /// </remarks>
+    public string ResourceBranch { get; init; } = string.Empty;
+
     public static PerfectWorldRemoteConfig Parse(string xml)
     {
         var root = XDocument.Parse(xml).Root
@@ -34,11 +47,13 @@ public sealed class PerfectWorldRemoteConfig
 
         return new PerfectWorldRemoteConfig
         {
-            ResVersion = extraValue("ResVersion") ?? string.Empty,
-            ResSize    = resSize,
-            Hash       = extraValue("Hash") ?? string.Empty,
-            ListHash   = extraValue("listHash") ?? string.Empty,
-            DiffHash   = extraValue("diffHash") ?? string.Empty
+            ResVersion     = extraValue("ResVersion") ?? string.Empty,
+            ResSize        = resSize,
+            Hash           = extraValue("Hash") ?? string.Empty,
+            ListHash       = extraValue("listHash") ?? string.Empty,
+            DiffHash       = extraValue("diffHash") ?? string.Empty,
+            ResourceBranch = PerfectWorldJson.TryGetStringFromBase64(extraValue("ResConfig"), "branchName")?.Trim()
+                             ?? string.Empty
         };
     }
 

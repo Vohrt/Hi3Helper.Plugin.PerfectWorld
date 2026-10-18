@@ -14,8 +14,28 @@ public sealed class PerfectWorldGameConfig
     /// <summary>Numeric application id used to derive the manifest AES key (NTE / 异环 = <c>1289</c>).</summary>
     public required string AppId { get; init; }
 
-    /// <summary>Game-resource branch, e.g. <c>publish_PC</c>.</summary>
+    /// <summary>
+    ///     Seed (default) game-resource branch, e.g. <c>publish_PC</c>.
+    /// </summary>
+    /// <remarks>
+    ///     This is only the <em>entry</em> branch. A <c>pw_sdk</c> title may move its live resources to a different
+    ///     branch at a major version bump while leaving the old one frozen on its last manifest (异环/NTE 1.4:
+    ///     <c>publish_PC</c> → <c>PC_140</c>). The branch actually in use is therefore resolved at runtime — from the
+    ///     vendor's on-disk <c>PatcherConfig.json</c> and from the branch advertised in <c>config.xml</c>'s
+    ///     <c>&lt;ResConfig&gt;</c> blob — and exposed as <c>PerfectWorldGameManager.EffectiveGameResBranch</c>. Always
+    ///     build resource URLs with that effective branch, not with this property directly.
+    /// </remarks>
     public required string GameResBranch { get; init; }
+
+    /// <summary>
+    ///     Install-relative path of the vendor patcher configuration that declares the resource branch currently in
+    ///     use, e.g. <c>NTELauncher\ResFilesM\1289\PatcherConfig\PatcherConfig.json</c> for 异环/NTE or
+    ///     <c>P5XLaunch\ResFilesM\1264\PatcherConfig\PatcherConfig.json</c> for P5X. The vendor rewrites this file
+    ///     (as part of its launcher tree) when it moves to a new resource branch, so it is the local, authoritative
+    ///     hint for which branch to read first. Empty disables the local probe; the branch advertised inside
+    ///     <c>config.xml</c> is still honoured.
+    /// </summary>
+    public string LauncherPatcherConfigRelativePath { get; init; } = string.Empty;
 
     /// <summary>Platform path segment used in the resource URLs, e.g. <c>Windows</c>.</summary>
     public string Platform { get; init; } = "Windows";
@@ -233,41 +253,43 @@ public sealed class PerfectWorldGameConfig
     /// </summary>
     public (string Key, string Value)[] LauncherAutoClickSilentSettings { get; init; } = [];
 
-    private string PrimaryGameResCdn =>
-        GameResCdnUrls is { Length: > 0 } ? GameResCdnUrls[0].TrimEnd('/') : string.Empty;
-
-    /// <summary>Plaintext resource entry point: <c>.../{branch}/Version/{platform}/config.xml?tValue={ms}</c>.</summary>
-    public string BuildConfigXmlUrl(string cdnRoot)
+    /// <summary>
+    ///     Plaintext resource entry point: <c>.../{branch}/Version/{platform}/config.xml?tValue={ms}</c>.
+    /// </summary>
+    /// <param name="branch">
+    ///     The <em>effective</em> resource branch (<c>PerfectWorldGameManager.EffectiveGameResBranch</c>), which is not
+    ///     necessarily <see cref="GameResBranch"/>: a major version bump can move the live resources to a new branch.
+    /// </param>
+    public string BuildConfigXmlUrl(string cdnRoot, string branch)
     {
         long ms = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
-        return $"{cdnRoot.TrimEnd('/')}/{GameResBranch}/Version/{Platform}/config.xml?tValue={ms.ToString(CultureInfo.InvariantCulture)}";
+        return $"{cdnRoot.TrimEnd('/')}/{branch}/Version/{Platform}/config.xml?tValue={ms.ToString(CultureInfo.InvariantCulture)}";
     }
 
-    /// <summary>Encrypted manifest bundle: <c>.../{branch}/Version/{platform}/version/{resVersion}/ResList.bin.zip</c>.</summary>
-    public string BuildResListZipUrl(string cdnRoot, string resVersion)
+    /// <summary>
+    ///     Encrypted manifest bundle: <c>.../{branch}/Version/{platform}/version/{resVersion}/ResList.bin.zip</c>.
+    /// </summary>
+    public string BuildResListZipUrl(string cdnRoot, string branch, string resVersion)
     {
-        return $"{cdnRoot.TrimEnd('/')}/{GameResBranch}/Version/{Platform}/version/{resVersion}/ResList.bin.zip";
+        return $"{cdnRoot.TrimEnd('/')}/{branch}/Version/{Platform}/version/{resVersion}/ResList.bin.zip";
     }
 
     /// <summary>
     ///     Encrypted incremental (delta) manifest: <c>.../{branch}/Version/{platform}/version/{resVersion}/lastdiff.bin</c>.
     ///     Unlike <c>ResList</c> this blob is served raw (not zip-wrapped) but shares the same PatcherXML0 envelope.
     /// </summary>
-    public string BuildLastDiffUrl(string cdnRoot, string resVersion)
+    public string BuildLastDiffUrl(string cdnRoot, string branch, string resVersion)
     {
-        return $"{cdnRoot.TrimEnd('/')}/{GameResBranch}/Version/{Platform}/version/{resVersion}/lastdiff.bin";
+        return $"{cdnRoot.TrimEnd('/')}/{branch}/Version/{Platform}/version/{resVersion}/lastdiff.bin";
     }
 
     /// <summary>
     ///     Content-addressed file URL: <c>.../{branch}/Res/{md5[0]}/{md5}.{size}</c>.
     /// </summary>
-    public string BuildContentUrl(string cdnRoot, string md5, long size)
+    public string BuildContentUrl(string cdnRoot, string branch, string md5, long size)
     {
-        return $"{cdnRoot.TrimEnd('/')}/{GameResBranch}/Res/{md5[..1]}/{md5}.{size.ToString(CultureInfo.InvariantCulture)}";
+        return $"{cdnRoot.TrimEnd('/')}/{branch}/Res/{md5[..1]}/{md5}.{size.ToString(CultureInfo.InvariantCulture)}";
     }
-
-    /// <summary>Content-addressed file URL on the primary CDN.</summary>
-    public string BuildContentUrl(string md5, long size) => BuildContentUrl(PrimaryGameResCdn, md5, size);
 
     /// <summary>Launcher self-update version descriptor: <c>.../{branch}/launcher/Version.ini</c>.</summary>
     public string BuildLauncherVersionIniUrl(string cdnRoot)

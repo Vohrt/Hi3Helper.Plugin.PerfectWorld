@@ -77,7 +77,7 @@ public partial class PerfectWorldGameInstaller
 
             PerfectWorldGameConfig config = Manager.Config;
             byte[] zipBytes = await DownloadBytesWithFallbackAsync(
-                cdn => config.BuildResListZipUrl(cdn, remote.ResVersion), token).ConfigureAwait(false);
+                cdn => config.BuildResListZipUrl(cdn, Manager.EffectiveGameResBranch, remote.ResVersion), token).ConfigureAwait(false);
 
             byte[] resListBin = ExtractZipEntry(zipBytes, "ResList.bin");
             string xml = PatcherXml0.DecodeToXml(resListBin, config.AppId);
@@ -497,7 +497,7 @@ public partial class PerfectWorldGameInstaller
 
         PerfectWorldGameConfig config = Manager.Config;
         byte[] zipBytes = await DownloadBytesWithFallbackAsync(
-            cdn => config.BuildResListZipUrl(cdn, resVersion), token).ConfigureAwait(false);
+            cdn => config.BuildResListZipUrl(cdn, Manager.EffectiveGameResBranch, resVersion), token).ConfigureAwait(false);
         byte[] resListBin = ExtractZipEntry(zipBytes, "ResList.bin");
         return PatcherXml0.DecodeToXml(resListBin, config.AppId);
     }
@@ -529,7 +529,7 @@ public partial class PerfectWorldGameInstaller
                 bundle.Files, bundle.Paks, catalogXml, remote.ResVersion, installPath,
                 out int resCount, out string tag, out var voiceSections, out string clientXml);
             string configXml = PerfectWorldPatcherState.BuildLocalConfigXml(
-                config.GameResBranch, remote, tag, resCount, voiceSections);
+                Manager.EffectiveGameResBranch, remote, tag, resCount, voiceSections);
 
             string stateDir = Path.Combine(installPath, config.LauncherRootDirName, "UserData", "Patcher", "PatcherSDK");
             Directory.CreateDirectory(stateDir);

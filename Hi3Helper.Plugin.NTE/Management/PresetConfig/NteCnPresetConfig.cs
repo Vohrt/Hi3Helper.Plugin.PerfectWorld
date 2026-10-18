@@ -46,6 +46,11 @@ public partial class NteCnPresetConfig : PluginPresetConfigBase
         GameResBranch                    = "publish_PC",
         Platform                         = "Windows",
         GameResCdnUrls                   = ["https://yhcdn1.wmupd.com/clientRes", "https://yhcdn2.wmupd.com/clientRes"],
+        // The vendor rewrites this file inside the launcher tree whenever it moves the game-resource branch, so it is
+        // the local, authoritative "which branch is live" hint (config.xml's <ResConfig> blob is the remote fallback).
+        // 1.4 moved publish_PC → PC_140 while the old branch was left frozen on 1.3.16 — reading only the preset seed
+        // would therefore keep reporting "up to date" forever.
+        LauncherPatcherConfigRelativePath = @"NTELauncher\ResFilesM\1289\PatcherConfig\PatcherConfig.json",
         LauncherBranch                   = "publish_ob",
         LauncherCdnUrls                  = ["https://yhcdn1.wmupd.com/hd", "https://yhcdn2.wmupd.com/hd"],
         GameExecutableRelativePath       = ExEcutableName,

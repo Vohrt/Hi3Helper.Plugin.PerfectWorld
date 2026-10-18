@@ -9,6 +9,7 @@ using Hi3Helper.Plugin.Core;
 using Hi3Helper.Plugin.Core.Management;
 using Hi3Helper.Plugin.Core.Utility;
 using Hi3Helper.PerfectWorld.Core.Management.Api;
+using Hi3Helper.PerfectWorld.Core.Utils;
 using Microsoft.Extensions.Logging;
 
 namespace Hi3Helper.PerfectWorld.Core.Management;
@@ -31,6 +32,11 @@ public partial class PerfectWorldGameManager : GameManagerBase
 
     private readonly PerfectWorldGameConfig _config;
     private PerfectWorldRemoteConfig? _remoteConfig;
+
+    // The branch the current _remoteConfig was actually read from (see EffectiveGameResBranch): the seed branch from
+    // the preset, the vendor's on-disk PatcherConfig.json, or the branch advertised inside config.xml.
+    private string? _effectiveGameResBranch;
+
     private bool _isInitialized;
 
     /// <summary>
@@ -102,23 +108,73 @@ public partial class PerfectWorldGameManager : GameManagerBase
     protected override GameVersion ApiPreloadGameVersion { get; set; } = GameVersion.Empty;
 
     /// <summary>
+    ///     The game-resource branch the current remote config actually lives on.
+    /// </summary>
+    /// <remarks>
+    ///     Normally <see cref="PerfectWorldGameConfig.GameResBranch"/>, but a <c>pw_sdk</c> title can move its live
+    ///     resources to a different branch at a major version bump and leave the old one frozen on its last manifest
+    ///     (异环/NTE 1.4: <c>publish_PC</c> → <c>PC_140</c>; a plugin that keeps reading the old branch keeps seeing the
+    ///     previous version and never reports the update). Resolved by <see cref="GetRemoteConfigAsync"/> from, in order:
+    ///     the vendor's on-disk <c>PatcherConfig.json</c>, and the branch advertised inside the fetched
+    ///     <c>config.xml</c>. Every resource URL — and the forged <c>PatcherSDK</c> state's <c>LocalBranch</c> — must be
+    ///     built with this value rather than the seed branch.
+    /// </remarks>
+    internal string EffectiveGameResBranch => _effectiveGameResBranch ?? _config.GameResBranch;
+
+    /// <summary>
     ///     Returns the cached remote config, fetching it once if required.
     /// </summary>
     internal async Task<PerfectWorldRemoteConfig?> GetRemoteConfigAsync(bool forceRefresh, CancellationToken token)
     {
         if (!forceRefresh && _remoteConfig != null) return _remoteConfig;
 
+        // Start from the branch the vendor's own patcher configuration declares (it is rewritten when the title moves
+        // to a new resource branch during a launcher update), falling back to the preset's seed branch.
+        string branch = ResolveSeedGameResBranch();
+        PerfectWorldRemoteConfig? remote = await FetchRemoteConfigAsync(branch, token).ConfigureAwait(false);
+
+        if (remote != null && !string.IsNullOrEmpty(remote.ResourceBranch) &&
+            !string.Equals(remote.ResourceBranch, branch, StringComparison.OrdinalIgnoreCase))
+        {
+            // The config we just read advertises a different live branch. The branch we read from is frozen at the
+            // version it was retired on, so re-read config.xml from the advertised branch to get the current version.
+            // This mirrors the vendor patcher (its log shows LocalBranch → RemoteBranch) and is what keeps the plugin
+            // from reporting a stale "already up to date".
+            SharedStatic.InstanceLogger.LogInformation(
+                "[PerfectWorldManager] config.xml advertises resource branch {Declared} (read from {Current}); re-reading from the advertised branch.",
+                remote.ResourceBranch, branch);
+
+            PerfectWorldRemoteConfig? advertised = await FetchRemoteConfigAsync(remote.ResourceBranch, token)
+                .ConfigureAwait(false);
+            if (advertised != null)
+            {
+                branch = remote.ResourceBranch;
+                remote = advertised;
+            }
+        }
+
+        if (remote == null) return _remoteConfig;
+
+        _effectiveGameResBranch = branch;
+        _remoteConfig = remote;
+        SharedStatic.InstanceLogger.LogInformation(
+            "[PerfectWorldManager] Remote config: branch={Branch}, ResVersion={Version}, ResSize={Size}",
+            branch, remote.ResVersion, remote.ResSize);
+        return _remoteConfig;
+    }
+
+    /// <summary>
+    ///     Fetches and parses <c>config.xml</c> from <paramref name="branch"/> on every configured CDN in order.
+    /// </summary>
+    private async Task<PerfectWorldRemoteConfig?> FetchRemoteConfigAsync(string branch, CancellationToken token)
+    {
         foreach (string cdnRoot in _config.GameResCdnUrls)
         {
-            string url = _config.BuildConfigXmlUrl(cdnRoot);
+            string url = _config.BuildConfigXmlUrl(cdnRoot, branch);
             try
             {
                 string xml = await ApiResponseHttpClient.GetStringAsync(url, token).ConfigureAwait(false);
-                _remoteConfig = PerfectWorldRemoteConfig.Parse(xml);
-                SharedStatic.InstanceLogger.LogInformation(
-                    "[PerfectWorldManager] Remote config: ResVersion={Version}, ResSize={Size}",
-                    _remoteConfig.ResVersion, _remoteConfig.ResSize);
-                return _remoteConfig;
+                return PerfectWorldRemoteConfig.Parse(xml);
             }
             // Only a genuine caller cancellation should abort the CDN loop. An HttpClient *timeout* also surfaces as
             // an OperationCanceledException/TaskCanceledException but with the caller's token NOT cancelled, and that
@@ -130,7 +186,43 @@ public partial class PerfectWorldGameManager : GameManagerBase
             }
         }
 
-        return _remoteConfig;
+        return null;
+    }
+
+    /// <summary>
+    ///     Resolves the branch to read <c>config.xml</c> from: the <c>branchName</c> declared by the vendor's installed
+    ///     <c>PatcherConfig.json</c> when present, otherwise the preset's seed branch.
+    /// </summary>
+    private string ResolveSeedGameResBranch()
+    {
+        string fallback = _config.GameResBranch;
+        if (string.IsNullOrEmpty(CurrentGameInstallPath) ||
+            string.IsNullOrEmpty(_config.LauncherPatcherConfigRelativePath))
+            return fallback;
+
+        try
+        {
+            string path = Path.Combine(CurrentGameInstallPath, _config.LauncherPatcherConfigRelativePath);
+            if (!File.Exists(path)) return fallback;
+
+            string? declared = PerfectWorldJson.TryGetString(File.ReadAllText(path), "branchName")?.Trim();
+            if (!string.IsNullOrEmpty(declared) &&
+                !string.Equals(declared, fallback, StringComparison.OrdinalIgnoreCase))
+            {
+                SharedStatic.InstanceLogger.LogInformation(
+                    "[PerfectWorldManager] Vendor PatcherConfig.json declares resource branch {Declared} (preset seed: {Seed}).",
+                    declared, fallback);
+            }
+
+            return string.IsNullOrEmpty(declared) ? fallback : declared;
+        }
+        catch (Exception ex)
+        {
+            SharedStatic.InstanceLogger.LogWarning(
+                "[PerfectWorldManager] Could not read the vendor PatcherConfig.json (using seed branch {Branch}): {Msg}",
+                fallback, ex.Message);
+            return fallback;
+        }
     }
 
     internal Task<int> InitAsyncInner(bool forceInit, CancellationToken token)

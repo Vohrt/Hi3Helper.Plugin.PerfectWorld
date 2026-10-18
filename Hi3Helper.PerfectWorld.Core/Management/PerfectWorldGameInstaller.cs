@@ -190,7 +190,7 @@ public partial class PerfectWorldGameInstaller : GameInstallerBase
 
         for (int cdnIndex = 0; cdnIndex < config.GameResCdnUrls.Length; cdnIndex++)
         {
-            string url = config.BuildContentUrl(config.GameResCdnUrls[cdnIndex], md5, expectedSize);
+            string url = config.BuildContentUrl(config.GameResCdnUrls[cdnIndex], Manager.EffectiveGameResBranch, md5, expectedSize);
             try
             {
                 await DownloadFileAsync(url, tempPath, expectedSize, token, onProgress, reported).ConfigureAwait(false);

@@ -62,7 +62,7 @@ public partial class PerfectWorldGameInstaller
 
             PerfectWorldGameConfig config = Manager.Config;
             byte[] raw = await DownloadBytesWithFallbackAsync(
-                cdn => config.BuildLastDiffUrl(cdn, remote.ResVersion), token).ConfigureAwait(false);
+                cdn => config.BuildLastDiffUrl(cdn, Manager.EffectiveGameResBranch, remote.ResVersion), token).ConfigureAwait(false);
 
             byte[] bin = LooksLikeZip(raw) ? ExtractZipEntry(raw, "lastdiff.bin") : raw;
             string xml = PatcherXml0.DecodeToXml(bin, config.AppId);
