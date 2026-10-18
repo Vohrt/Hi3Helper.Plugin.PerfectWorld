@@ -37,6 +37,10 @@ public partial class PerfectWorldGameManager : GameManagerBase
     // the preset, the vendor's on-disk PatcherConfig.json, or the branch advertised inside config.xml.
     private string? _effectiveGameResBranch;
 
+    // 0 = the installed version has not been resolved from disk yet for the current game path. Reset whenever the path
+    // changes, so EnsureLocalVersionProbed() re-reads it for the new location.
+    private int _localVersionProbeDone;
+
     private bool _isInitialized;
 
     /// <summary>
@@ -100,6 +104,28 @@ public partial class PerfectWorldGameManager : GameManagerBase
             (ApiGameVersion != GameVersion.Empty && CurrentGameVersion != ApiGameVersion) ||
             _launcherHasUpdate
         );
+
+    /// <summary>
+    ///     The installed version, resolved from disk on first read when nothing has populated it yet.
+    /// </summary>
+    /// <remarks>
+    ///     The host asks for the install state <em>synchronously</em> (its plugin-side <c>IGameVersion.GetGameState</c>
+    ///     never awaits anything) immediately after it hands the game path over. Our initialization cannot be awaited
+    ///     from there — it has to fetch the remote <c>config.xml</c> — so on a cold start the host used to observe an
+    ///     empty version and report the game as <c>NotInstalled</c> ("安装/定位游戏" on a fully installed game) until the
+    ///     user switched to another game and back, which by then reused the values the first initialization had
+    ///     committed. Resolving the cheap, local half (the state file / official <c>config.xml</c>) lazily on read
+    ///     closes that window; the remote half is primed by the preset's <c>InitAsync</c> at plugin load.
+    /// </remarks>
+    protected override GameVersion CurrentGameVersion
+    {
+        get
+        {
+            EnsureLocalVersionProbed();
+            return base.CurrentGameVersion;
+        }
+        set => base.CurrentGameVersion = value;
+    }
 
     // pw_sdk exposes upcoming versions through the same delta channel; a dedicated preload feed is not used.
     protected override bool HasPreload => false;
@@ -259,7 +285,10 @@ public partial class PerfectWorldGameManager : GameManagerBase
             if (generation.HasValue && generation.Value != _initGeneration)
                 throw new OperationCanceledException();
 
-            CurrentGameVersion = localGameVersion;
+            // A path-less initialization (started from the preset's InitAsync at plugin load) has no local version to
+            // report; committing an empty one would clobber what a path-bound initialization already resolved.
+            if (!string.IsNullOrEmpty(CurrentGameInstallPath))
+                CurrentGameVersion = localGameVersion;
             if (apiGameVersion.HasValue)
                 ApiGameVersion = apiGameVersion.Value;
             _launcherHasUpdate = launcherHasUpdate;
@@ -271,6 +300,18 @@ public partial class PerfectWorldGameManager : GameManagerBase
     }
 
     protected override Task<int> InitAsync(CancellationToken token) => InitAsyncInner(true, token);
+
+    /// <summary>
+    ///     Runs the full initialization (remote config + local state) on demand, without waiting for the host to set the
+    ///     game path.
+    /// </summary>
+    /// <remarks>
+    ///     Called from the thin presets' <c>InitAsync</c>. The host awaits that once, at plugin load
+    ///     (<c>PluginManager</c> → <c>PluginInfo.Initialize</c>), which is the last startup hook that can run before the
+    ///     home page performs its first — synchronous — game-state query. Without it the API version is still unknown at
+    ///     that point, so even a correctly detected install would render as up-to-date instead of "update available".
+    /// </remarks>
+    public Task<int> EnsureInitializedAsync(CancellationToken token) => InitAsyncInner(true, token);
 
     /// <summary>
     ///     Determines whether the installed vendor launcher is older than the build advertised on the CDN by comparing
@@ -449,9 +490,39 @@ public partial class PerfectWorldGameManager : GameManagerBase
         }
     }
 
+    /// <summary>
+    ///     Resolves the installed version from disk the first time it is read, when nothing has populated it yet.
+    /// </summary>
+    /// <remarks>
+    ///     The host's plugin-side state query is synchronous and happens as soon as it hands the game path over, while
+    ///     our initialization still has to fetch the remote <c>config.xml</c>. Reading the local marker (a tiny INI, or
+    ///     the official <c>config.xml</c> as a fallback) is pure disk I/O and cannot race anything, so doing it lazily
+    ///     keeps the install state correct from the very first query. Only the first caller per install path performs
+    ///     the read; the flag is reset by <see cref="SetGamePathInner"/> when the path changes.
+    /// </remarks>
+    private void EnsureLocalVersionProbed()
+    {
+        if (Volatile.Read(ref _localVersionProbeDone) != 0) return;
+        if (Interlocked.Exchange(ref _localVersionProbeDone, 1) != 0) return;
+
+        // Read through the base accessor: this runs from the property override, which would recurse otherwise.
+        if (base.CurrentGameVersion != GameVersion.Empty) return;
+
+        string? localVersion = ReadInstalledResVersion();
+        if (string.IsNullOrEmpty(localVersion)) return;
+
+        base.CurrentGameVersion = new GameVersion(localVersion);
+        SharedStatic.InstanceLogger?.LogInformation(
+            "[PerfectWorldManager] Resolved installed version {Version} from disk while initialization is still in flight.",
+            localVersion);
+    }
+
     protected override void SetGamePathInner(string gamePath)
     {
         CurrentGameInstallPath = gamePath;
+
+        // A different path may hold a different install (or none): let the next version read re-probe from disk.
+        Volatile.Write(ref _localVersionProbeDone, 0);
 
         lock (_initSync)
         {

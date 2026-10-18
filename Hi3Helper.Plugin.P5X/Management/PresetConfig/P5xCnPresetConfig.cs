@@ -169,8 +169,30 @@ public partial class P5xCnPresetConfig : PluginPresetConfigBase
         set;
     }
 
-    protected override Task<int> InitAsync(CancellationToken token)
+    protected override async Task<int> InitAsync(CancellationToken token)
     {
-        return Task.FromResult(0);
+        // Same startup contract as 异环: this is awaited at plugin load, so prime the shared manager before the home
+        // page's first synchronous game-state query.
+        if (GameManager is not PerfectWorldGameManager manager)
+        {
+            return 0;
+        }
+
+        try
+        {
+            using var cts = CancellationTokenSource.CreateLinkedTokenSource(token);
+            cts.CancelAfter(TimeSpan.FromSeconds(5)); // never stall launcher startup on a slow/unreachable CDN
+            await manager.EnsureInitializedAsync(cts.Token).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (token.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception)
+        {
+            // Best effort only; the state is re-resolved on game selection.
+        }
+
+        return 0;
     }
 }

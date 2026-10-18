@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
 using System.IO;
@@ -177,8 +178,34 @@ public partial class NteCnPresetConfig : PluginPresetConfigBase
         set;
     }
 
-    protected override Task<int> InitAsync(CancellationToken token)
+    protected override async Task<int> InitAsync(CancellationToken token)
     {
-        return Task.FromResult(0);
+        // The host awaits this exactly once, at plugin load (PluginManager -> PluginInfo.Initialize) — before any game is
+        // selected, and before the home page performs its first *synchronous* game-state query. Prime the shared manager
+        // here so that query already knows the remote version; otherwise a cold start reports "installed" with no update
+        // until the user re-selects the game.
+        if (GameManager is not PerfectWorldGameManager manager)
+        {
+            return 0;
+        }
+
+        try
+        {
+            using var cts = CancellationTokenSource.CreateLinkedTokenSource(token);
+            // A slow or unreachable CDN must never stall launcher startup: the manager re-initializes (and retries) as
+            // soon as the host hands the game path over.
+            cts.CancelAfter(TimeSpan.FromSeconds(5));
+            await manager.EnsureInitializedAsync(cts.Token).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (token.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception)
+        {
+            // Best effort only; the state is re-resolved on game selection.
+        }
+
+        return 0;
     }
 }
