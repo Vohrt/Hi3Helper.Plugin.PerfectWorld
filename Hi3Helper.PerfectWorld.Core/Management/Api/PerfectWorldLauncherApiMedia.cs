@@ -45,10 +45,19 @@ public partial class PerfectWorldLauncherApiMedia : LauncherApiMediaBase
 
     private string? _backgroundImagePath;
     private string? _backgroundVideoPath;
+
+    // Set once the dynamic bgimgs path produced something, so the local resource-pack fallback never overwrites it.
+    private bool    _dynamicBackgroundSet;
+
+    // Set once the local resource-pack background was resolved AND validated against the installed pack.
     private bool    _localBackgroundResolved;
 
     // Cache file base name for the background extracted from the local vendor resource pack (P5X).
     private const string LocalBackgroundCacheName = "resbg";
+
+    // Records the last install path the host handed over, so the background still resolves on the very first region
+    // load of a process (the host asks for the entries before it sets the path — see TryGetInstallPath).
+    private const string InstallPathCacheFileName = "install.path";
 
     public PerfectWorldLauncherApiMedia(PerfectWorldGameConfig config, bool enableVideoBackground = true,
         IGameManager? gameManager = null)
@@ -69,7 +78,7 @@ public partial class PerfectWorldLauncherApiMedia : LauncherApiMediaBase
 
     protected override async Task<int> InitAsync(CancellationToken token)
     {
-        string cacheDir = Path.Combine(Path.GetTempPath(), "CollapsePerfectWorldMedia", _config.AppId);
+        string cacheDir = GetMediaCacheDir();
 
         try
         {
@@ -86,8 +95,8 @@ public partial class PerfectWorldLauncherApiMedia : LauncherApiMediaBase
         }
 
         // Local fallback: games without a dynamic bgimgs folder (P5X) keep their home key-visual inside the
-        // installed vendor 'qres' pack. Only attempt this when the dynamic path produced no image.
-        if (string.IsNullOrEmpty(_backgroundImagePath))
+        // installed vendor 'qres' pack. Only attempt this when the dynamic path produced nothing.
+        if (!_dynamicBackgroundSet)
         {
             await Task.Run(() => TryResolveLocalBackgroundImage(cacheDir), token).ConfigureAwait(false);
         }
@@ -182,6 +191,9 @@ public partial class PerfectWorldLauncherApiMedia : LauncherApiMediaBase
             _backgroundVideoPath = await CacheAssetAsync(baseUrl, bgFiles, videoFile, cacheDir, token)
                 .ConfigureAwait(false);
         }
+
+        _dynamicBackgroundSet = !string.IsNullOrEmpty(_backgroundImagePath) ||
+                                !string.IsNullOrEmpty(_backgroundVideoPath);
     }
 
     /// <summary>
@@ -191,25 +203,27 @@ public partial class PerfectWorldLauncherApiMedia : LauncherApiMediaBase
     /// </summary>
     private void TryResolveLocalBackgroundImage(string cacheDir)
     {
-        if (_localBackgroundResolved || !string.IsNullOrEmpty(_backgroundImagePath))
+        if (_localBackgroundResolved || _dynamicBackgroundSet)
         {
             return;
         }
 
         string? relativePackPath = _config.LocalBackgroundResPackRelativePath;
-        if (string.IsNullOrEmpty(relativePackPath) || _gameManager is null)
+        if (string.IsNullOrEmpty(relativePackPath))
         {
             return;
         }
 
-        _gameManager.GetGamePath(out string? installPath);
-        if (string.IsNullOrEmpty(installPath))
+        if (!TryGetInstallPath(out string? installPath))
         {
-            // Install path not set yet (pre-install, or media initialized before the host set the path).
+            // Neither the host nor a previous session knows where the game is (first run with a cleared temp folder):
+            // serve the cached image if one exists, so the launcher is not left spinning on a background that never
+            // arrives. _localBackgroundResolved stays false, so a later call that does know the path still validates it.
+            TryAdoptExistingCachedBackground(cacheDir);
             return;
         }
 
-        string packPath = Path.Combine(installPath, relativePackPath);
+        string packPath = Path.Combine(installPath!, relativePackPath);
 
         try
         {
@@ -244,20 +258,21 @@ public partial class PerfectWorldLauncherApiMedia : LauncherApiMediaBase
     /// </summary>
     private void TryUseCachedLocalBackgroundImage()
     {
-        if (_localBackgroundResolved || !string.IsNullOrEmpty(_backgroundImagePath) ||
-            string.IsNullOrEmpty(_config.LocalBackgroundResPackRelativePath) || _gameManager is null)
+        if (_localBackgroundResolved || _dynamicBackgroundSet ||
+            string.IsNullOrEmpty(_config.LocalBackgroundResPackRelativePath))
         {
             return;
         }
 
-        _gameManager.GetGamePath(out string? installPath);
-        if (string.IsNullOrEmpty(installPath))
+        string cacheDir = GetMediaCacheDir();
+
+        if (!TryGetInstallPath(out string? installPath))
         {
+            TryAdoptExistingCachedBackground(cacheDir);
             return;
         }
 
-        string packPath = Path.Combine(installPath, _config.LocalBackgroundResPackRelativePath);
-        string cacheDir = Path.Combine(Path.GetTempPath(), "CollapsePerfectWorldMedia", _config.AppId);
+        string packPath = Path.Combine(installPath!, _config.LocalBackgroundResPackRelativePath);
 
         string? cached = PerfectWorldResDataBackground.TryGetValidCachedBackground(
             packPath, cacheDir, LocalBackgroundCacheName);
@@ -266,6 +281,102 @@ public partial class PerfectWorldLauncherApiMedia : LauncherApiMediaBase
             _backgroundImagePath     = cached;
             _localBackgroundResolved = true;
         }
+    }
+
+    /// <summary>Per-game media cache directory (background image/video and the last known install path).</summary>
+    private string GetMediaCacheDir() => Path.Combine(Path.GetTempPath(), "CollapsePerfectWorldMedia", _config.AppId);
+
+    /// <summary>
+    ///     Resolves the game's install path for the local resource-pack background lookup.
+    /// </summary>
+    /// <remarks>
+    ///     The host reads the background entries during its region load — <c>PluginLauncherApiWrapper.LoadAsync</c> →
+    ///     <c>ConvertBackgroundImageEntries</c> → <c>GetBackgroundEntries</c> — and only calls
+    ///     <c>IGameManager.SetGamePath</c> later in the same load (<c>FinalizeLoadRegion</c> →
+    ///     <c>GamePropertyVault.RegisterGameProperty</c> → <c>PluginGameVersionWrapper</c>). So on the first region load
+    ///     of a process the manager still has no path. For P5X, whose background lives inside the installed
+    ///     <c>P5XLaunch\ResData\1264.dat</c> pack, that used to yield zero entries; the host then keeps the previous
+    ///     game's image and its "loading background" spinner forever (its own placeholder fallback is skipped because a
+    ///     content list is present, just empty). Remember the path whenever the host does provide it and fall back to
+    ///     the remembered one here.
+    /// </remarks>
+    private bool TryGetInstallPath(out string? installPath)
+    {
+        installPath = null;
+
+        if (_gameManager is not null)
+        {
+            _gameManager.GetGamePath(out string? hostPath);
+            if (!string.IsNullOrEmpty(hostPath))
+            {
+                installPath = hostPath;
+                PersistInstallPath(hostPath!);
+                return true;
+            }
+        }
+
+        string recorded = Path.Combine(GetMediaCacheDir(), InstallPathCacheFileName);
+        try
+        {
+            if (!File.Exists(recorded)) return false;
+
+            string cached = File.ReadAllText(recorded).Trim();
+            if (string.IsNullOrEmpty(cached) || !Directory.Exists(cached)) return false;
+
+            installPath = cached;
+            return true;
+        }
+        catch (Exception ex)
+        {
+            SharedStatic.InstanceLogger.LogWarning(
+                "[PerfectWorldMedia] Could not read the recorded install path: {Msg}", ex.Message);
+            return false;
+        }
+    }
+
+    /// <summary>Records the install path the host handed over (best effort, and only when it changed).</summary>
+    private void PersistInstallPath(string installPath)
+    {
+        try
+        {
+            string dir = GetMediaCacheDir();
+            Directory.CreateDirectory(dir);
+
+            string file = Path.Combine(dir, InstallPathCacheFileName);
+            if (File.Exists(file) &&
+                string.Equals(File.ReadAllText(file).Trim(), installPath, StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            File.WriteAllText(file, installPath);
+        }
+        catch (Exception ex)
+        {
+            SharedStatic.InstanceLogger.LogWarning(
+                "[PerfectWorldMedia] Could not record the install path: {Msg}", ex.Message);
+        }
+    }
+
+    /// <summary>
+    ///     Last resort: serve an already-extracted background PNG even though the installed pack could not be validated
+    ///     against it (no install path known at all). <see cref="_localBackgroundResolved"/> deliberately stays
+    ///     <see langword="false"/>, so the next call that does know the path re-validates and refreshes a stale image
+    ///     instead of adopting it forever.
+    /// </summary>
+    private void TryAdoptExistingCachedBackground(string cacheDir)
+    {
+        if (_localBackgroundResolved || _dynamicBackgroundSet || !string.IsNullOrEmpty(_backgroundImagePath))
+        {
+            return;
+        }
+
+        string cached = Path.Combine(cacheDir, LocalBackgroundCacheName + ".png");
+        if (!File.Exists(cached) || new FileInfo(cached).Length == 0) return;
+
+        _backgroundImagePath = cached;
+        SharedStatic.InstanceLogger.LogWarning(
+            "[PerfectWorldMedia] Install path unknown; serving the cached local background unvalidated: {Path}", cached);
     }
 
     public override void GetBackgroundFlag(out LauncherBackgroundFlag result)
