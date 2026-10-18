@@ -11,6 +11,8 @@ Currently included:
 | ------ | ---- | ------ |
 | `Hi3Helper.Plugin.NTE` | **Neverness To Everness** (异环) | `1289` |
 | `Hi3Helper.Plugin.P5X` | **Persona 5: The Phantom X** | `1264` |
+<img width="2560" height="1436" alt="image" src="https://github.com/user-attachments/assets/c4fa96c9-304a-4eca-bb7f-cfced7cd947a" />
+<img width="2556" height="1440" alt="image" src="https://github.com/user-attachments/assets/051ea68d-bede-4061-bd5f-983ae93a042b" />
 
 ---
 
