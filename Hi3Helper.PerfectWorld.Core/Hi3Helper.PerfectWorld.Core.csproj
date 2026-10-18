@@ -39,11 +39,13 @@
 
     <ItemGroup>
         <!-- Managed HDiffPatch applier for block-level incremental updates (pw_sdk uncompressed HDIFF13 diffs).
-             Referenced from the in-repo submodule fork (Vohrt/SharpHDiffPatch.Core) instead of the upstream
-             NuGet package: the fork windows the in-memory output cache so patches whose target file exceeds
-             2 GiB apply successfully. The stock 2.3.4/2.4.0 package throws at the ~2 GiB MemoryStream limit,
-             which made every >2 GiB delta fall back to a full re-download. -->
-        <ProjectReference Include="..\SharpHDiffPatch.Core\SharpHDiffPatch.Core\SharpHDiffPatch.Core.csproj"/>
+             Referenced from the in-repo submodule (upstream CollapseLauncher/SharpHDiffPatch.Core, package
+             SharpHPatchZ v3.x) instead of the NuGet package. Upstream v3 rewrote the output pipeline: each patch
+             worker fills a fixed-size buffer (PatchWorkerBufferSize, default 1 MiB) and flushes it with a
+             position-based write, so a single cover spanning several GiB never lands in one in-memory stream.
+             That architecturally removes the ~2 GiB MemoryStream limit that the old 2.3.4/2.4.0 package hit,
+             which used to make every >2 GiB delta fall back to a full re-download. -->
+        <ProjectReference Include="..\SharpHDiffPatch.Core\SharpHPatchZ\SharpHPatchZ.csproj"/>
     </ItemGroup>
 
     <ItemGroup>

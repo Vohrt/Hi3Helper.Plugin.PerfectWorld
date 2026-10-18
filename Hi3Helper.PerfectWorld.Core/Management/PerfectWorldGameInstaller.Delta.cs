@@ -10,7 +10,8 @@ using Hi3Helper.Plugin.Core.Management;
 using Hi3Helper.PerfectWorld.Core.Management.Api;
 using Hi3Helper.PerfectWorld.Core.Utils;
 using Microsoft.Extensions.Logging;
-using SharpHDiffPatch.Core;
+using SharpHPatchZ;
+using SharpHPatchZ.Header;
 
 namespace Hi3Helper.PerfectWorld.Core.Management;
 
@@ -406,9 +407,27 @@ public partial class PerfectWorldGameInstaller
             {
                 await Task.Run(() =>
                 {
-                    var patcher = new HDiffPatch();
-                    patcher.Initialize(patchPath);
-                    patcher.Patch(localPath, outputPath, useBufferedPatch: true, token);
+                    // SharpHPatchZ v3 API: read the patch header into an HDiffInfo, then apply it. The old
+                    //   var patcher = new HDiffPatch(); patcher.Initialize(...); patcher.Patch(...)
+                    // surface no longer exists. Failures are REPORTED, not thrown: Patch/PatchAsync return a
+                    // PatchResult that implicitly converts to bool (success) or Exception (failure). Treating
+                    // that result as ignored would silently swallow a failed delta and leave a half-written
+                    // output file, so it is checked explicitly and rethrown as an IOException to keep the
+                    // caller's "fall back to a full download" contract.
+                    using HDiffInfo info = HPatch.CreateInstance(patchPath);
+                    PatchResult result = HPatch.Patch(info,
+                                                      patchPath,
+                                                      localPath,
+                                                      outputPath,
+                                                      PatchOptions.Default,
+                                                      progressCallback: null,
+                                                      token);
+
+                    if (result.Exception is { } patchFailure)
+                    {
+                        throw new IOException($"HDiff patch failed for {entry.Filename}: {patchFailure.Message}",
+                                              patchFailure);
+                    }
                 }, token).ConfigureAwait(false);
             }
             finally

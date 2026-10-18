@@ -3,4 +3,4 @@
 	url = https://github.com/CollapseLauncher/Hi3Helper.Plugin.Core.git
 [submodule "SharpHDiffPatch.Core"]
 	path = SharpHDiffPatch.Core
-	url = https://github.com/Vohrt/SharpHDiffPatch.Core.git
+	url = https://github.com/CollapseLauncher/SharpHDiffPatch.Core.git

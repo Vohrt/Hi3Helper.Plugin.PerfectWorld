@@ -1,0 +1,18 @@
+<Project>
+
+  <!--
+    SharpHPatchZ (the upstream CollapseLauncher/SharpHDiffPatch.Core v3 submodule) multi-targets
+    netstandard2.0;net6.0..net11.0. The net11.0 leg requires a .NET 11 SDK, but this solution builds
+    with net10.0, so building the submodule here fails with NETSDK1045 even though its net10.0 leg is
+    perfectly usable.
+
+    This targets file runs AFTER the submodule's own csproj, so it can narrow the framework list
+    without editing the submodule (which must stay a pristine upstream checkout). The plugin Core
+    only ever consumes net10.0, so dropping the net11.0 leg changes nothing for shipped assemblies.
+  -->
+  <PropertyGroup Condition="'$(MSBuildProjectName)' == 'SharpHPatchZ'">
+    <TargetFrameworks>net10.0</TargetFrameworks>
+    <TargetFramework>net10.0</TargetFramework>
+  </PropertyGroup>
+
+</Project>
